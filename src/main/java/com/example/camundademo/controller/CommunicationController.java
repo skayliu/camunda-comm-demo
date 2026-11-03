@@ -42,6 +42,9 @@ public class CommunicationController {
     @Autowired
     private HistoryService historyService;
 
+    @Autowired
+    private org.camunda.bpm.engine.IdentityService identityService;
+
     // ===== 流程演示辅助接口 =====
 
     /** 启动流程：申请人 = 当前登录用户 */
@@ -50,8 +53,36 @@ public class CommunicationController {
         String initiator = CurrentUser.require(authentication);
         Map<String, Object> vars = new HashMap<>();
         vars.put("applicant", initiator);
-        ProcessInstance pi = runtimeService.startProcessInstanceByKey("approval", vars);
-        return Collections.singletonMap("processInstanceId", pi.getId());
+        // 记录发起人，历史表中 START_USER_ID_ 才有值，「我的发起」才能查得到
+        identityService.setAuthenticatedUserId(initiator);
+        try {
+            ProcessInstance pi = runtimeService.startProcessInstanceByKey("approval", vars);
+            return Collections.singletonMap("processInstanceId", pi.getId());
+        } finally {
+            identityService.clearAuthentication();
+        }
+    }
+
+    /** 可选沟通对象（前端选择器用）：只返回账号与显示名，不暴露密码等敏感信息 */
+    @GetMapping("/targets")
+    public List<Map<String, Object>> targets(@RequestParam(required = false) String keyword,
+                                             Authentication authentication) {
+        String currentUser = CurrentUser.require(authentication);
+        String kw = keyword == null ? "" : keyword.trim();
+        List<Map<String, Object>> result = new ArrayList<>();
+        List<org.camunda.bpm.engine.identity.User> users = identityService.createUserQuery()
+                .userFirstNameLike("%" + kw + "%")
+                .listPage(0, 50);
+        for (org.camunda.bpm.engine.identity.User u : users) {
+            if (u.getId().equals(currentUser)) {
+                continue;
+            }
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", u.getId());
+            m.put("name", u.getFirstName() == null ? u.getId() : u.getFirstName());
+            result.add(m);
+        }
+        return result;
     }
 
     /** 查看任务列表：默认查自己；显式查他人需与当前用户一致，避免越权浏览待办 */
@@ -81,9 +112,11 @@ public class CommunicationController {
         return result;
     }
 
-    /** 完成任务（审批提交）：只能完成分派给自己的任务 */
+    /** 完成任务（审批提交）：只能完成分派给自己的任务；可选审批意见 */
     @PostMapping("/demo/complete/{taskId}")
-    public Map<String, Object> complete(@PathVariable String taskId, Authentication authentication) {
+    public Map<String, Object> complete(@PathVariable String taskId,
+                                        @RequestBody(required = false) Map<String, Object> req,
+                                        Authentication authentication) {
         String currentUser = CurrentUser.require(authentication);
 
         Task task = taskService.createTaskQuery().taskId(taskId).singleResult();
@@ -95,7 +128,11 @@ public class CommunicationController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "不能完成他人的待办");
         }
 
+        Object comment = req == null ? null : req.get("comment");
         try {
+            if (comment != null && !String.valueOf(comment).isBlank()) {
+                taskService.createComment(taskId, currentUser, String.valueOf(comment));
+            }
             taskService.complete(taskId);
             return Collections.singletonMap("result", "ok");
         } catch (RuntimeException e) {

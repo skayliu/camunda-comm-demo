@@ -19,6 +19,9 @@ hs_err_pid*
 
 /target/
 
+# 前端依赖：仅忽略依赖目录，前端源码与配置均纳入版本库
+/frontend/node_modules/
+
 .classpath
 .settings
 .project

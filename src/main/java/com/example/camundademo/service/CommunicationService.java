@@ -100,7 +100,8 @@ public class CommunicationService {
                 // 创建Camunda原生旁路沟通任务（无executionId），
                 // taskDefinitionKey 记为「源节点key#COMM」，便于追溯是哪个节点发起的沟通
                 TaskEntity commTask = (TaskEntity) taskService.newTask();
-                commTask.setName("沟通：请反馈意见 - " + content);
+                // 沟通任务沿用源待办（当前待办）的名称，待办列表里与源节点保持一致
+                commTask.setName(resolveTaskDisplayName(rootTask));
                 commTask.setTaskDefinitionKey(BizCommTask.buildCommTaskKey(rootTask.getTaskDefinitionKey()));
                 commTask.setParentTaskId(rootTaskId);
                 commTask.setProcessInstanceId(rootTask.getProcessInstanceId());
@@ -359,6 +360,26 @@ public class CommunicationService {
     }
 
     /**
+     * 沟通任务显示名：沿用源待办的名称。
+     * 节点未配置 name 时 Camunda 返回 null，直接使用会在待办列表出现空标题，
+     * 因此回退到节点定义 key，最后兜底为固定文案，保证列表永远有可读标题。
+     */
+    private static String resolveTaskDisplayName(Task sourceTask) {
+        if (sourceTask == null) {
+            return "沟通";
+        }
+        String name = sourceTask.getName();
+        if (name != null && !name.trim().isEmpty()) {
+            return name;
+        }
+        String taskDefinitionKey = sourceTask.getTaskDefinitionKey();
+        if (taskDefinitionKey != null && !taskDefinitionKey.isEmpty()) {
+            return taskDefinitionKey;
+        }
+        return "沟通";
+    }
+
+    /**
      * 继续沟通
      */
     public void continueCommunication(String parentCommTaskRecordId, String userId, String content,
@@ -409,7 +430,10 @@ public class CommunicationService {
                 String newRecordId = UUID.randomUUID().toString().replace("-", "");
 
                 TaskEntity commTask = (TaskEntity) taskService.newTask();
-                commTask.setName("沟通追问：" + content);
+                // 追问同样沿用源待办名称，与源节点保持一致；用 description 保留“追问 + 轮次 + 内容”，
+                // 前端/报表需要区分首轮与追问时读 description，不必依赖任务名
+                commTask.setName(resolveTaskDisplayName(rootTask));
+                commTask.setDescription("沟通追问（第 " + session.getCurrentRound() + " 轮）：" + content);
                 commTask.setTaskDefinitionKey(BizCommTask.buildCommTaskKey(rootTask.getTaskDefinitionKey()));
                 commTask.setParentTaskId(parent.getSourceTaskId());
                 if (procInstId != null) {
@@ -495,6 +519,13 @@ public class CommunicationService {
             Task task = taskService.createTaskQuery().taskId(taskId).singleResult();
             boolean isCommTask = task != null && BizCommTask.isCommTaskKey(task.getTaskDefinitionKey());
             vo.put("isCommTask", isCommTask);
+            // 待办本身是追问任务时直接给出标识，前端无需再解析 taskDefinitionKey
+            boolean isFollowUp = false;
+            if (isCommTask) {
+                BizCommTask selfRecord = taskMgr.findByCamundaTaskId(taskId);
+                isFollowUp = selfRecord != null && selfRecord.getParentCommTaskId() != null;
+            }
+            vo.put("isFollowUp", isFollowUp);
 
             String bizStatus = ext == null ? BizTaskExt.STATUS_NORMAL : ext.getBizStatus();
             String activeSessionId = ext == null ? null : ext.getActiveSessionId();
@@ -543,6 +574,8 @@ public class CommunicationService {
                     Map<String, Object> tvo = new LinkedHashMap<>();
                     tvo.put("id", ct.getId());
                     tvo.put("parentCommTaskId", ct.getParentCommTaskId());
+                    // 有父沟通记录即为追问，便于前端列表直接区分“首轮沟通 / 追问”
+                    tvo.put("isFollowUp", ct.getParentCommTaskId() != null);
                     tvo.put("sourceTaskDefKey", resolveSourceTaskDefKey(ct, session.getRootTaskId()));
                     tvo.put("targetId", ct.getTargetId());
                     tvo.put("targetName", ct.getTargetName());
@@ -563,5 +596,34 @@ public class CommunicationService {
             vo.put("canContinueComm", !isCommTask && task != null);
             return vo;
         });
+    }
+
+    // ===== 待办中心用的只读查询 =====
+
+    /**
+     * 按 Camunda 任务ID 查沟通记录（待办中心识别“这是一条沟通待办”后取上下文用）。
+     * 业务表 BIZ_COMM_TASK_.DEPT_PROC_INST_ID_ 实际存的是旁路任务ID。
+     */
+    public BizCommTask getCommRecordByCamundaTaskId(String camundaTaskId) {
+        return getEngineConfig().getCommandExecutorTxRequired().execute(
+                (Command<BizCommTask>) commandContext -> commandContext
+                        .getSession(BizCommTaskManager.class)
+                        .findByCamundaTaskId(camundaTaskId));
+    }
+
+    /** 查会话内全部沟通记录（用于展示同一轮其他对象的反馈进度） */
+    public List<BizCommTask> getCommRecordsBySessionId(String sessionId) {
+        return getEngineConfig().getCommandExecutorTxRequired().execute(
+                (Command<List<BizCommTask>>) commandContext -> commandContext
+                        .getSession(BizCommTaskManager.class)
+                        .findBySessionId(sessionId));
+    }
+
+    /** 按ID查会话 */
+    public BizCommSession getSessionById(String sessionId) {
+        return getEngineConfig().getCommandExecutorTxRequired().execute(
+                (Command<BizCommSession>) commandContext -> commandContext
+                        .getSession(BizCommSessionManager.class)
+                        .findById(sessionId));
     }
 }

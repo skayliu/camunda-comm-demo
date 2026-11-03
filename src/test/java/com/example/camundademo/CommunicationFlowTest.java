@@ -255,10 +255,15 @@ class CommunicationFlowTest {
         assertEquals(2, commAssignees.size(), "引擎内沟通待办数量异常: " + dumpAllTasks());
         assertTrue(commAssignees.containsAll(java.util.Arrays.asList("carol", "dave")),
                 "引擎内沟通待办缺失接收人: " + dumpAllTasks());
-        // taskDefinitionKey 必须带上源节点前缀，才能看出是哪个节点发起的沟通
+        // taskDefinitionKey 必须带上源节点前缀，才能看出是哪个节点发起的沟通；
+        // name 必须沿用源待办的名称（不能是拼出来的“沟通：…”），否则待办列表无法与源节点对齐
+        String sourceTaskName = engineTaskService.createTaskQuery().taskId(managerTaskId).singleResult().getName();
+        assertNotNull(sourceTaskName, "源待办本身应有名称: " + dumpAllTasks());
         for (org.camunda.bpm.engine.task.Task t : commEngineTasks) {
             assertEquals("manager_review" + BizCommTask.TASK_KEY_SUFFIX, t.getTaskDefinitionKey(),
                     "沟通任务 key 应带源节点前缀: " + dumpAllTasks());
+            assertEquals(sourceTaskName, t.getName(),
+                    "沟通任务名称应沿用源待办名称: " + dumpAllTasks());
         }
 
         // 沟通旁路任务本身不允许再次发起沟通（同样要在反馈删除之前校验）
@@ -358,6 +363,23 @@ class CommunicationFlowTest {
             assertEquals("manager_review", t.get("sourceTaskDefKey"),
                     "追问记录应继承会话发起节点: " + t);
         }
+
+        // 追问任务同样沿用源待办名称，靠 description 区分“追问 + 轮次 + 内容”，
+        // 这样待办列表里追问项与源节点同名，不会出现“沟通追问：…”这类与节点名不一致的标题
+        List<org.camunda.bpm.engine.task.Task> followUpTasks = engineTaskService.createTaskQuery()
+                .processInstanceId(pid)
+                .taskDefinitionKeyLike("%" + BizCommTask.TASK_KEY_SUFFIX)
+                .taskAssignee("frank")
+                .list();
+        assertEquals(1, followUpTasks.size(), "追问待办数量异常: " + dumpAllTasks());
+        org.camunda.bpm.engine.task.Task followUp = followUpTasks.get(0);
+        String followUpSourceName = engineTaskService.createTaskQuery().taskId(managerTaskId).singleResult().getName();
+        assertEquals(followUpSourceName, followUp.getName(),
+                "追问任务名称应沿用源待办名称: " + dumpAllTasks());
+        assertTrue(followUp.getDescription() != null && followUp.getDescription().contains("追问"),
+                "追问任务描述应能区分追问: " + followUp.getDescription());
+        assertTrue(followUp.getDescription().contains("第 2 轮"),
+                "追问任务描述应包含轮次: " + followUp.getDescription());
 
         replyTo(secondRound, "frank", "版本号 V2 正确");
         Map<String, Object> finalStatus = get("/api/comm/status/" + managerTaskId, "manager");

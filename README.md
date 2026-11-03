@@ -139,6 +139,10 @@ curl -X POST "http://localhost:8080/api/comm/demo/complete/$MGR_TASK_ID"
 ### 关键设计原则
 - 沟通任务用`taskService.newTask()`创建，taskDefinitionKey=`源节点key#COMM`（如 `manager_review#COMM`），无executionId，完全旁路；据此可直接看出沟通由哪个流程节点发起
 - 同时把来源节点单独落到 `BIZ_COMM_TASK_.SOURCE_TASK_DEF_KEY_`（如 `manager_review`），报表可按节点直接 GROUP BY，不必再截取 `#COMM` 前缀；历史记录该列为空时，查询接口会从旁路任务 key 或根待办 key 兜底还原
+- 沟通任务的 `name` 沿用源待办名称（如“经理审批”），与待办列表中的源节点对齐；源节点未配置 name 时回退为节点 key，再兜底“沟通”，避免出现空标题
+- 追问任务的 `name` 同样沿用源待办名称，改用 `description` 区分追问（形如 `沟通追问（第 2 轮）：…`）；判断“是否追问”请读 description 或 `BIZ_COMM_TASK_` 的父子关系，不要依赖名称前缀
+- 待办 / 已办 / 我的发起列表以及 `/api/comm/status` 的沟通条目均返回 `isFollowUp`（依据 `PARENT_COMM_TASK_ID_` 是否为空），前端据此把沟通标签区分为「首轮沟通」与「追问」，无需解析节点 key 或名称
+- 待办列表支持 `type=all|approval|comm|followup` 四类筛选：`comm` 为全部沟通（含追问），`followup` 只返回追问任务；`stats` 同时给出 `comm` 与 `followup` 计数
 - 所有写操作包装为引擎Command，融入引擎事务和乐观锁
 - 不依赖Spring事务管理，完全在引擎CommandContext内执行数据库操作
 - 前端按钮禁用仅为体验优化，后端拦截器做权限兜底
