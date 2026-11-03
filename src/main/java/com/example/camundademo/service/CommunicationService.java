@@ -55,9 +55,9 @@ public class CommunicationService {
             if (initiator == null || !initiator.equals(rootTask.getAssignee())) {
                 throw new BusinessException("仅当前待办处理人可发起沟通");
             }
-            if (targets == null || targets.isEmpty()) {
-                throw new BusinessException("请至少选择一个沟通对象");
-            }
+            // 归一化沟通对象：不同前端可能提交 id/name 或 name/value，
+            // 这里统一解析出“账号标识 + 显示名”，避免 null 落库
+            List<Map<String, String>> normalizedTargets = normalizeTargets(targets);
 
             BizTaskExtManager extMgr = commandContext.getSession(BizTaskExtManager.class);
             BizCommSessionManager sessionMgr = commandContext.getSession(BizCommSessionManager.class);
@@ -91,16 +91,17 @@ public class CommunicationService {
             session.setCreateTime(new Date());
             sessionMgr.insert(session);
 
-            for (Map<String, String> t : targets) {
+            for (Map<String, String> t : normalizedTargets) {
                 String commRecordId = UUID.randomUUID().toString().replace("-", "");
                 String targetType = t.get("type");
                 String targetId = t.get("id");
                 String targetName = t.get("name");
 
-                // 创建Camunda原生旁路沟通任务（taskDefinitionKey=COMM，无executionId）
+                // 创建Camunda原生旁路沟通任务（无executionId），
+                // taskDefinitionKey 记为「源节点key#COMM」，便于追溯是哪个节点发起的沟通
                 TaskEntity commTask = (TaskEntity) taskService.newTask();
                 commTask.setName("沟通：请反馈意见 - " + content);
-                commTask.setTaskDefinitionKey("COMM");
+                commTask.setTaskDefinitionKey(BizCommTask.buildCommTaskKey(rootTask.getTaskDefinitionKey()));
                 commTask.setParentTaskId(rootTaskId);
                 commTask.setProcessInstanceId(rootTask.getProcessInstanceId());
                 // 必须带上流程定义 ID：standalone 任务若 processDefinitionId 为空，
@@ -129,6 +130,8 @@ public class CommunicationService {
                 ct.setParentCommTaskId(null);
                 ct.setSourceTaskId(rootTaskId);
                 ct.setRootTaskId(rootTaskId);
+                // 单独落一份来源节点 key，报表按节点统计时无需解析 #COMM 后缀
+                ct.setSourceTaskDefKey(rootTask.getTaskDefinitionKey());
                 ct.setTargetType(targetType);
                 ct.setTargetId(targetId);
                 ct.setTargetName(targetName);
@@ -230,6 +233,64 @@ public class CommunicationService {
         }
     }
 
+    /** 允许的沟通对象类型，与表 BIZ_COMM_TASK_.TARGET_TYPE_ 的取值保持一致 */
+    private static final Set<String> SUPPORTED_TARGET_TYPES =
+            Collections.unmodifiableSet(new HashSet<>(Arrays.asList("USER", "DEPT")));
+
+    /**
+     * 归一化沟通对象。
+     *
+     * <p>接口文档约定用 {@code {"type","id","name"}}，但前端人员选择器常直接提交
+     * {@code {"type","name","value"}}（name 是账号、value 是显示名）。两种格式都在这里收敛：
+     * 账号标识按 id → userId → targetId → name → value 取第一个非空值，
+     * 显示名按 displayName → targetName → value → name 取第一个非空值。</p>
+     *
+     * <p>解析不出账号时抛业务异常，而不是让 null 落到 TARGET_ID_（NOT NULL）上引发 500。</p>
+     */
+    private List<Map<String, String>> normalizeTargets(List<Map<String, String>> rawTargets) {
+        if (rawTargets == null || rawTargets.isEmpty()) {
+            throw new BusinessException("请至少选择一个沟通对象");
+        }
+        List<Map<String, String>> result = new ArrayList<>(rawTargets.size());
+        for (int i = 0; i < rawTargets.size(); i++) {
+            Map<String, String> raw = rawTargets.get(i);
+            String label = "第" + (i + 1) + "个沟通对象";
+            if (raw == null) {
+                throw new BusinessException(label + "为空");
+            }
+
+            String type = firstNonBlank(raw.get("type"), "USER").toUpperCase(Locale.ROOT);
+            if (!SUPPORTED_TARGET_TYPES.contains(type)) {
+                throw new BusinessException(label + "的类型不支持：" + type + "（仅支持 USER / DEPT）");
+            }
+
+            String targetId = firstNonBlank(raw.get("id"), raw.get("userId"),
+                    raw.get("targetId"), raw.get("name"), raw.get("value"));
+            if (targetId == null) {
+                throw new BusinessException(label + "缺少账号标识，请提供 id（或 name/value）");
+            }
+
+            String targetName = firstNonBlank(raw.get("displayName"), raw.get("targetName"),
+                    raw.get("value"), raw.get("name"), targetId);
+
+            Map<String, String> normalized = new HashMap<>(4);
+            normalized.put("type", type);
+            normalized.put("id", targetId);
+            normalized.put("name", targetName);
+            result.add(normalized);
+        }
+        return result;
+    }
+
+    private static String firstNonBlank(String... candidates) {
+        for (String c : candidates) {
+            if (c != null && !c.trim().isEmpty()) {
+                return c.trim();
+            }
+        }
+        return null;
+    }
+
     /**
      * 反馈沟通意见
      */
@@ -320,6 +381,7 @@ public class CommunicationService {
             if (targets == null || targets.isEmpty()) {
                 throw new BusinessException("请至少选择一个沟通对象");
             }
+            List<Map<String, String>> normalizedTargets = normalizeTargets(targets);
 
             // 先确认源待办仍存在：已结束的待办再建旁路任务会得到 processDefinitionId=null，
             // Camunda 解析 taskDefinition 时会退化为按 caseDefinitionId 查 CMMN 并抛错。
@@ -343,12 +405,12 @@ public class CommunicationService {
                 extMgr.update(ext);
             }
 
-            for (Map<String, String> t : targets) {
+            for (Map<String, String> t : normalizedTargets) {
                 String newRecordId = UUID.randomUUID().toString().replace("-", "");
 
                 TaskEntity commTask = (TaskEntity) taskService.newTask();
                 commTask.setName("沟通追问：" + content);
-                commTask.setTaskDefinitionKey("COMM");
+                commTask.setTaskDefinitionKey(BizCommTask.buildCommTaskKey(rootTask.getTaskDefinitionKey()));
                 commTask.setParentTaskId(parent.getSourceTaskId());
                 if (procInstId != null) {
                     commTask.setProcessInstanceId(procInstId);
@@ -376,6 +438,9 @@ public class CommunicationService {
                 ct.setParentCommTaskId(parentCommTaskRecordId);
                 ct.setSourceTaskId(parent.getSourceTaskId());
                 ct.setRootTaskId(parent.getRootTaskId());
+                // 追问同样归属会话发起节点；历史父记录可能没有该字段，回退到父记录的上游节点
+                ct.setSourceTaskDefKey(rootTask.getTaskDefinitionKey() != null
+                        ? rootTask.getTaskDefinitionKey() : parent.getSourceTaskDefKey());
                 ct.setTargetType(t.get("type"));
                 ct.setTargetId(t.get("id"));
                 ct.setTargetName(t.get("name"));
@@ -387,6 +452,30 @@ public class CommunicationService {
             }
             return null;
         });
+    }
+
+    /**
+     * 取沟通记录的来源节点 key。
+     * 新记录直接读字段；历史记录（字段为空）从旁路任务 key 还原，再退到根待办的节点 key。
+     */
+    private String resolveSourceTaskDefKey(BizCommTask ct, String rootTaskId) {
+        if (ct.getSourceTaskDefKey() != null) {
+            return ct.getSourceTaskDefKey();
+        }
+        String fromCommTask = BizCommTask.parseSourceTaskDefKey(taskDefinitionKeyOf(ct.getDeptProcInstId()));
+        if (fromCommTask != null) {
+            return fromCommTask;
+        }
+        return BizCommTask.parseSourceTaskDefKey(taskDefinitionKeyOf(rootTaskId));
+    }
+
+    /** 查询任务节点 key，任务不存在时返回 null（不抛异常） */
+    private String taskDefinitionKeyOf(String taskId) {
+        if (taskId == null) {
+            return null;
+        }
+        Task task = taskService.createTaskQuery().taskId(taskId).singleResult();
+        return task == null ? null : task.getTaskDefinitionKey();
     }
 
     /**
@@ -404,7 +493,7 @@ public class CommunicationService {
             vo.put("taskId", taskId);
 
             Task task = taskService.createTaskQuery().taskId(taskId).singleResult();
-            boolean isCommTask = task != null && "COMM".equals(task.getTaskDefinitionKey());
+            boolean isCommTask = task != null && BizCommTask.isCommTaskKey(task.getTaskDefinitionKey());
             vo.put("isCommTask", isCommTask);
 
             String bizStatus = ext == null ? BizTaskExt.STATUS_NORMAL : ext.getBizStatus();
@@ -454,6 +543,7 @@ public class CommunicationService {
                     Map<String, Object> tvo = new LinkedHashMap<>();
                     tvo.put("id", ct.getId());
                     tvo.put("parentCommTaskId", ct.getParentCommTaskId());
+                    tvo.put("sourceTaskDefKey", resolveSourceTaskDefKey(ct, session.getRootTaskId()));
                     tvo.put("targetId", ct.getTargetId());
                     tvo.put("targetName", ct.getTargetName());
                     tvo.put("targetType", ct.getTargetType());
