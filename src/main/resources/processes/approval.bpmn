@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+                  id="Definitions_1"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+
+    <bpmn:process id="approval" name="审批流程（带沟通）" isExecutable="true" camunda:historyTimeToLive="180">
+        <bpmn:startEvent id="start" name="发起申请">
+            <bpmn:outgoing>flow1</bpmn:outgoing>
+        </bpmn:startEvent>
+
+        <bpmn:userTask id="apply" name="填写申请" camunda:assignee="${applicant}">
+            <bpmn:incoming>flow1</bpmn:incoming>
+            <bpmn:outgoing>flow2</bpmn:outgoing>
+        </bpmn:userTask>
+
+        <bpmn:userTask id="manager_review" name="经理审批" camunda:assignee="manager">
+            <bpmn:incoming>flow2</bpmn:incoming>
+            <bpmn:outgoing>flow3</bpmn:outgoing>
+        </bpmn:userTask>
+
+        <bpmn:userTask id="finance_review" name="财务审批" camunda:assignee="finance">
+            <bpmn:incoming>flow3</bpmn:incoming>
+            <bpmn:outgoing>flow4</bpmn:outgoing>
+        </bpmn:userTask>
+
+        <bpmn:endEvent id="end" name="流程结束">
+            <bpmn:incoming>flow4</bpmn:incoming>
+        </bpmn:endEvent>
+
+        <bpmn:sequenceFlow id="flow1" sourceRef="start" targetRef="apply"/>
+        <bpmn:sequenceFlow id="flow2" sourceRef="apply" targetRef="manager_review"/>
+        <bpmn:sequenceFlow id="flow3" sourceRef="manager_review" targetRef="finance_review"/>
+        <bpmn:sequenceFlow id="flow4" sourceRef="finance_review" targetRef="end"/>
+    </bpmn:process>
+
+    <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+        <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="approval">
+            <bpmndi:BPMNShape id="_BPMNShape_StartEvent_1" bpmnElement="start">
+                <dc:Bounds x="40" y="100" width="36" height="36"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="BPMNShape_apply" bpmnElement="apply">
+                <dc:Bounds x="130" y="80" width="100" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="BPMNShape_manager" bpmnElement="manager_review">
+                <dc:Bounds x="290" y="80" width="100" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="BPMNShape_finance" bpmnElement="finance_review">
+                <dc:Bounds x="450" y="80" width="100" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="_BPMNShape_EndEvent_1" bpmnElement="end">
+                <dc:Bounds x="620" y="100" width="36" height="36"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNEdge id="BPMNEdge_flow1" bpmnElement="flow1">
+                <di:waypoint x="76" y="118"/><di:waypoint x="130" y="120"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="BPMNEdge_flow2" bpmnElement="flow2">
+                <di:waypoint x="230" y="120"/><di:waypoint x="290" y="120"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="BPMNEdge_flow3" bpmnElement="flow3">
+                <di:waypoint x="390" y="120"/><di:waypoint x="450" y="120"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="BPMNEdge_flow4" bpmnElement="flow4">
+                <di:waypoint x="550" y="120"/><di:waypoint x="620" y="118"/>
+            </bpmndi:BPMNEdge>
+        </bpmndi:BPMNPlane>
+    </bpmndi:BPMNDiagram>
+
+</bpmn:definitions>

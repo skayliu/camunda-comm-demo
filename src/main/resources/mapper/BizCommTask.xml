@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.camundademo.persistence.BizCommTaskManager">
+
+    <resultMap id="bizCommTaskResultMap" type="com.example.camundademo.entity.BizCommTask">
+        <id property="id" column="ID_" jdbcType="VARCHAR"/>
+        <result property="sessionId" column="SESSION_ID_" jdbcType="VARCHAR"/>
+        <result property="parentCommTaskId" column="PARENT_COMM_TASK_ID_" jdbcType="VARCHAR"/>
+        <result property="sourceTaskId" column="SOURCE_TASK_ID_" jdbcType="VARCHAR"/>
+        <result property="rootTaskId" column="ROOT_TASK_ID_" jdbcType="VARCHAR"/>
+        <result property="targetType" column="TARGET_TYPE_" jdbcType="VARCHAR"/>
+        <result property="targetId" column="TARGET_ID_" jdbcType="VARCHAR"/>
+        <result property="targetName" column="TARGET_NAME_" jdbcType="VARCHAR"/>
+        <result property="content" column="CONTENT_" jdbcType="CLOB"/>
+        <result property="status" column="STATUS_" jdbcType="VARCHAR"/>
+        <result property="replyContent" column="REPLY_CONTENT_" jdbcType="CLOB"/>
+        <result property="replyUserId" column="REPLY_USER_ID_" jdbcType="VARCHAR"/>
+        <result property="replyTime" column="REPLY_TIME_" jdbcType="TIMESTAMP"/>
+        <result property="deptProcInstId" column="DEPT_PROC_INST_ID_" jdbcType="VARCHAR"/>
+        <result property="createTime" column="CREATE_TIME_" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <insert id="insertBizCommTask" parameterType="com.example.camundademo.entity.BizCommTask">
+        INSERT INTO BIZ_COMM_TASK_ (ID_, SESSION_ID_, PARENT_COMM_TASK_ID_, SOURCE_TASK_ID_, ROOT_TASK_ID_,
+            TARGET_TYPE_, TARGET_ID_, TARGET_NAME_, CONTENT_, STATUS_, REPLY_CONTENT_,
+            REPLY_USER_ID_, REPLY_TIME_, DEPT_PROC_INST_ID_, CREATE_TIME_)
+        VALUES (#{id, jdbcType=VARCHAR}, #{sessionId, jdbcType=VARCHAR}, #{parentCommTaskId, jdbcType=VARCHAR},
+                #{sourceTaskId, jdbcType=VARCHAR}, #{rootTaskId, jdbcType=VARCHAR},
+                #{targetType, jdbcType=VARCHAR}, #{targetId, jdbcType=VARCHAR}, #{targetName, jdbcType=VARCHAR},
+                #{content, jdbcType=CLOB}, #{status, jdbcType=VARCHAR}, #{replyContent, jdbcType=CLOB},
+                #{replyUserId, jdbcType=VARCHAR}, #{replyTime, jdbcType=TIMESTAMP},
+                #{deptProcInstId, jdbcType=VARCHAR}, #{createTime, jdbcType=TIMESTAMP})
+    </insert>
+
+    <update id="updateBizCommTask" parameterType="com.example.camundademo.entity.BizCommTask">
+        UPDATE BIZ_COMM_TASK_
+        SET STATUS_ = #{status, jdbcType=VARCHAR},
+            REPLY_CONTENT_ = #{replyContent, jdbcType=CLOB},
+            REPLY_USER_ID_ = #{replyUserId, jdbcType=VARCHAR},
+            REPLY_TIME_ = #{replyTime, jdbcType=TIMESTAMP}
+        WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </update>
+
+    <delete id="deleteBizCommTask" parameterType="string">
+        DELETE FROM BIZ_COMM_TASK_ WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </delete>
+
+    <select id="selectBizCommTask" parameterType="string" resultMap="bizCommTaskResultMap">
+        SELECT * FROM BIZ_COMM_TASK_ WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </select>
+
+    <select id="selectBySessionId" parameterType="string" resultMap="bizCommTaskResultMap">
+        SELECT * FROM BIZ_COMM_TASK_ WHERE SESSION_ID_ = #{sessionId, jdbcType=VARCHAR} ORDER BY CREATE_TIME_ ASC
+    </select>
+
+    <select id="selectPendingBySession" parameterType="string" resultMap="bizCommTaskResultMap">
+        SELECT * FROM BIZ_COMM_TASK_ WHERE SESSION_ID_ = #{sessionId, jdbcType=VARCHAR} AND STATUS_ = 'PENDING'
+    </select>
+
+    <select id="selectTopLevelPendingBySession" parameterType="string" resultMap="bizCommTaskResultMap">
+        SELECT * FROM BIZ_COMM_TASK_ WHERE SESSION_ID_ = #{sessionId, jdbcType=VARCHAR} AND STATUS_ = 'PENDING'
+            AND PARENT_COMM_TASK_ID_ IS NULL
+    </select>
+
+    <select id="countPendingTopLevel" parameterType="string" resultType="long">
+        SELECT COUNT(*) FROM BIZ_COMM_TASK_ WHERE SESSION_ID_ = #{sessionId, jdbcType=VARCHAR}
+            AND STATUS_ = 'PENDING' AND PARENT_COMM_TASK_ID_ IS NULL
+    </select>
+
+    <select id="selectByParentId" parameterType="string" resultMap="bizCommTaskResultMap">
+        SELECT * FROM BIZ_COMM_TASK_ WHERE PARENT_COMM_TASK_ID_ = #{parentCommTaskId, jdbcType=VARCHAR}
+    </select>
+
+    <select id="selectBySourceTaskId" parameterType="string" resultMap="bizCommTaskResultMap">
+        SELECT * FROM BIZ_COMM_TASK_ WHERE SOURCE_TASK_ID_ = #{sourceTaskId, jdbcType=VARCHAR}
+    </select>
+
+    <select id="selectByCamundaTaskId" parameterType="string" resultMap="bizCommTaskResultMap">
+        SELECT * FROM BIZ_COMM_TASK_ WHERE DEPT_PROC_INST_ID_ = #{camundaTaskId, jdbcType=VARCHAR}
+    </select>
+
+    <select id="selectByTargetAndStatus" parameterType="map" resultMap="bizCommTaskResultMap">
+        SELECT * FROM BIZ_COMM_TASK_ WHERE TARGET_ID_ = #{userId, jdbcType=VARCHAR} AND STATUS_ = #{status, jdbcType=VARCHAR}
+    </select>
+
+</mapper>

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.camundademo.persistence.BizCommSessionManager">
+
+    <resultMap id="bizCommSessionResultMap" type="com.example.camundademo.entity.BizCommSession">
+        <id property="id" column="ID_" jdbcType="VARCHAR"/>
+        <result property="rootTaskId" column="ROOT_TASK_ID_" jdbcType="VARCHAR"/>
+        <result property="initiator" column="INITIATOR_" jdbcType="VARCHAR"/>
+        <result property="initialContent" column="INITIAL_CONTENT_" jdbcType="CLOB"/>
+        <result property="status" column="STATUS_" jdbcType="VARCHAR"/>
+        <result property="currentRound" column="CURRENT_ROUND_" jdbcType="INTEGER"/>
+        <result property="createTime" column="CREATE_TIME_" jdbcType="TIMESTAMP"/>
+        <result property="finishTime" column="FINISH_TIME_" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <insert id="insertBizCommSession" parameterType="com.example.camundademo.entity.BizCommSession">
+        INSERT INTO BIZ_COMM_SESSION_ (ID_, ROOT_TASK_ID_, INITIATOR_, INITIAL_CONTENT_, STATUS_, CURRENT_ROUND_, CREATE_TIME_, FINISH_TIME_)
+        VALUES (#{id, jdbcType=VARCHAR}, #{rootTaskId, jdbcType=VARCHAR}, #{initiator, jdbcType=VARCHAR},
+                #{initialContent, jdbcType=CLOB}, #{status, jdbcType=VARCHAR}, #{currentRound, jdbcType=INTEGER},
+                #{createTime, jdbcType=TIMESTAMP}, #{finishTime, jdbcType=TIMESTAMP})
+    </insert>
+
+    <update id="updateBizCommSession" parameterType="com.example.camundademo.entity.BizCommSession">
+        UPDATE BIZ_COMM_SESSION_
+        SET STATUS_ = #{status, jdbcType=VARCHAR},
+            CURRENT_ROUND_ = #{currentRound, jdbcType=INTEGER},
+            FINISH_TIME_ = #{finishTime, jdbcType=TIMESTAMP}
+        WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </update>
+
+    <delete id="deleteBizCommSession" parameterType="string">
+        DELETE FROM BIZ_COMM_SESSION_ WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </delete>
+
+    <select id="selectBizCommSession" parameterType="string" resultMap="bizCommSessionResultMap">
+        SELECT * FROM BIZ_COMM_SESSION_ WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </select>
+
+    <select id="selectActiveByRootTask" parameterType="string" resultMap="bizCommSessionResultMap">
+        SELECT * FROM BIZ_COMM_SESSION_ WHERE ROOT_TASK_ID_ = #{rootTaskId, jdbcType=VARCHAR} AND STATUS_ = 'ACTIVE'
+    </select>
+
+    <!-- 会话结束后 activeSessionId 会被清空，按 rootTaskId 取最近一次会话用于历史回看 -->
+    <select id="selectLatestByRootTask" parameterType="string" resultMap="bizCommSessionResultMap">
+        SELECT * FROM BIZ_COMM_SESSION_
+        WHERE ROOT_TASK_ID_ = #{rootTaskId, jdbcType=VARCHAR}
+        ORDER BY CREATE_TIME_ DESC, ID_ DESC
+        LIMIT 1
+    </select>
+
+</mapper>

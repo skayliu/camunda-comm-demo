@@ -1,0 +1,31 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:camundadb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  h2:
+    console:
+      enabled: true
+      path: /h2
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+
+camunda.bpm:
+  # Camunda 7.24 默认不再自动部署 classpath 下的 BPMN，需显式开启
+  auto-deployment-enabled: true
+  deployment-resource-pattern: classpath*:**/*.bpmn
+  admin-user:
+    id: demo
+    password: demo
+    firstName: Demo
+  filter:
+    create: All tasks
+  database:
+    schema-update: true
+  history-level: full
+
+server:
+  port: 8080

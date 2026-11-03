@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.camundademo.persistence.BizTaskExtManager">
+
+    <resultMap id="bizTaskExtResultMap" type="com.example.camundademo.entity.BizTaskExt">
+        <id property="id" column="ID_" jdbcType="VARCHAR"/>
+        <result property="taskId" column="TASK_ID_" jdbcType="VARCHAR"/>
+        <result property="processInstanceId" column="PROC_INST_ID_" jdbcType="VARCHAR"/>
+        <result property="assignee" column="ASSIGNEE_" jdbcType="VARCHAR"/>
+        <result property="bizStatus" column="BIZ_STATUS_" jdbcType="VARCHAR"/>
+        <result property="activeSessionId" column="ACTIVE_SESSION_ID_" jdbcType="VARCHAR"/>
+        <result property="createTime" column="CREATE_TIME_" jdbcType="TIMESTAMP"/>
+        <result property="updateTime" column="UPDATE_TIME_" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <insert id="insertBizTaskExt" parameterType="com.example.camundademo.entity.BizTaskExt">
+        INSERT INTO BIZ_TASK_EXT_ (ID_, TASK_ID_, PROC_INST_ID_, ASSIGNEE_, BIZ_STATUS_, ACTIVE_SESSION_ID_, CREATE_TIME_, UPDATE_TIME_)
+        VALUES (#{id, jdbcType=VARCHAR}, #{taskId, jdbcType=VARCHAR}, #{processInstanceId, jdbcType=VARCHAR},
+                #{assignee, jdbcType=VARCHAR}, #{bizStatus, jdbcType=VARCHAR}, #{activeSessionId, jdbcType=VARCHAR},
+                #{createTime, jdbcType=TIMESTAMP}, #{updateTime, jdbcType=TIMESTAMP})
+    </insert>
+
+    <update id="updateBizTaskExt" parameterType="com.example.camundademo.entity.BizTaskExt">
+        UPDATE BIZ_TASK_EXT_
+        SET BIZ_STATUS_ = #{bizStatus, jdbcType=VARCHAR},
+            ACTIVE_SESSION_ID_ = #{activeSessionId, jdbcType=VARCHAR},
+            UPDATE_TIME_ = #{updateTime, jdbcType=TIMESTAMP}
+        WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </update>
+
+    <delete id="deleteBizTaskExt" parameterType="string">
+        DELETE FROM BIZ_TASK_EXT_ WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </delete>
+
+    <select id="selectBizTaskExt" parameterType="string" resultMap="bizTaskExtResultMap">
+        SELECT * FROM BIZ_TASK_EXT_ WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </select>
+
+    <select id="selectByTaskId" parameterType="string" resultMap="bizTaskExtResultMap">
+        SELECT * FROM BIZ_TASK_EXT_ WHERE TASK_ID_ = #{taskId, jdbcType=VARCHAR}
+    </select>
+
+</mapper>
