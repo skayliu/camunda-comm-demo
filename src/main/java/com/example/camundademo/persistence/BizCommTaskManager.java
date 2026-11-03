@@ -56,6 +56,19 @@ public class BizCommTaskManager extends AbstractManager implements Session {
         return selectList(MAPPER_NAMESPACE + ".selectBySourceTaskId", sourceTaskId);
     }
 
+    /** 按来源流程节点查询（报表用） */
+    public List<BizCommTask> findBySourceTaskDefKey(String sourceTaskDefKey) {
+        return selectList(MAPPER_NAMESPACE + ".selectBySourceTaskDefKey", sourceTaskDefKey);
+    }
+
+    /** 按来源流程节点统计沟通条数（报表用） */
+    public long countBySourceTaskDefKey(String sourceTaskDefKey) {
+        clearQueryCache();
+        Long count = (Long) getDbSqlSession().selectOne(
+                MAPPER_NAMESPACE + ".countBySourceTaskDefKey", sourceTaskDefKey);
+        return count == null ? 0 : count;
+    }
+
     /**
      * 按 Camunda 任务ID 查询沟通记录（DEPT_PROC_INST_ID_ 实际存放旁路任务ID）
      */

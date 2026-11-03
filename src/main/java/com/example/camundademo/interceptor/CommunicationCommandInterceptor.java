@@ -1,5 +1,6 @@
 package com.example.camundademo.interceptor;
 
+import com.example.camundademo.entity.BizCommTask;
 import com.example.camundademo.entity.BizTaskExt;
 import com.example.camundademo.persistence.BizTaskExtManager;
 import com.example.camundademo.service.CommunicationLockedException;
@@ -25,7 +26,8 @@ public class CommunicationCommandInterceptor extends CommandInterceptor {
                 TaskEntity task = getContext().getTaskManager().findTaskById(taskId);
                 if (task != null) {
                     // 沟通任务可以直接完成（相当于反馈），直接放行
-                    if ("COMM".equals(task.getTaskDefinitionKey())) {
+                    // key 形如「源节点key#COMM」，按后缀判断
+                    if (BizCommTask.isCommTaskKey(task.getTaskDefinitionKey())) {
                         return next.execute(command);
                     }
                     // 主流程待办：校验沟通状态

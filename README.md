@@ -134,10 +134,11 @@ curl -X POST "http://localhost:8080/api/comm/demo/complete/$MGR_TASK_ID"
 ### 表结构
 - `BIZ_TASK_EXT_`: 主流程待办业务扩展表（存沟通状态）
 - `BIZ_COMM_SESSION_`: 沟通会话表
-- `BIZ_COMM_TASK_`: 沟通任务明细表（含三层关联字段）
+- `BIZ_COMM_TASK_`: 沟通任务明细表（含三层关联字段，`SOURCE_TASK_DEF_KEY_` 直接记录发起节点 key）
 
 ### 关键设计原则
-- 沟通任务用`taskService.newTask()`创建，taskDefinitionKey=COMM，无executionId，完全旁路
+- 沟通任务用`taskService.newTask()`创建，taskDefinitionKey=`源节点key#COMM`（如 `manager_review#COMM`），无executionId，完全旁路；据此可直接看出沟通由哪个流程节点发起
+- 同时把来源节点单独落到 `BIZ_COMM_TASK_.SOURCE_TASK_DEF_KEY_`（如 `manager_review`），报表可按节点直接 GROUP BY，不必再截取 `#COMM` 前缀；历史记录该列为空时，查询接口会从旁路任务 key 或根待办 key 兜底还原
 - 所有写操作包装为引擎Command，融入引擎事务和乐观锁
 - 不依赖Spring事务管理，完全在引擎CommandContext内执行数据库操作
 - 前端按钮禁用仅为体验优化，后端拦截器做权限兜底

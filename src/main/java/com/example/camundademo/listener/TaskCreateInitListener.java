@@ -1,8 +1,8 @@
 package com.example.camundademo.listener;
 
+import com.example.camundademo.entity.BizCommTask;
 import com.example.camundademo.entity.BizTaskExt;
 import com.example.camundademo.persistence.BizTaskExtManager;
-import com.fasterxml.uuid.impl.UUIDUtil;
 import org.camunda.bpm.engine.delegate.DelegateTask;
 import org.camunda.bpm.engine.delegate.TaskListener;
 import org.camunda.bpm.engine.impl.context.Context;
@@ -21,7 +21,7 @@ public class TaskCreateInitListener implements TaskListener {
         TaskEntity task = (TaskEntity) delegateTask;
         // 沟通任务我们自己在创建时就初始化过扩展记录，跳过
         String taskDefKey = task.getTaskDefinitionKey();
-        if ("COMM".equals(taskDefKey)) {
+        if (BizCommTask.isCommTaskKey(taskDefKey)) {
             return;
         }
 

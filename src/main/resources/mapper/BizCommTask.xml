@@ -9,6 +9,7 @@
         <result property="parentCommTaskId" column="PARENT_COMM_TASK_ID_" jdbcType="VARCHAR"/>
         <result property="sourceTaskId" column="SOURCE_TASK_ID_" jdbcType="VARCHAR"/>
         <result property="rootTaskId" column="ROOT_TASK_ID_" jdbcType="VARCHAR"/>
+        <result property="sourceTaskDefKey" column="SOURCE_TASK_DEF_KEY_" jdbcType="VARCHAR"/>
         <result property="targetType" column="TARGET_TYPE_" jdbcType="VARCHAR"/>
         <result property="targetId" column="TARGET_ID_" jdbcType="VARCHAR"/>
         <result property="targetName" column="TARGET_NAME_" jdbcType="VARCHAR"/>
@@ -23,10 +24,11 @@
 
     <insert id="insertBizCommTask" parameterType="com.example.camundademo.entity.BizCommTask">
         INSERT INTO BIZ_COMM_TASK_ (ID_, SESSION_ID_, PARENT_COMM_TASK_ID_, SOURCE_TASK_ID_, ROOT_TASK_ID_,
-            TARGET_TYPE_, TARGET_ID_, TARGET_NAME_, CONTENT_, STATUS_, REPLY_CONTENT_,
+            SOURCE_TASK_DEF_KEY_, TARGET_TYPE_, TARGET_ID_, TARGET_NAME_, CONTENT_, STATUS_, REPLY_CONTENT_,
             REPLY_USER_ID_, REPLY_TIME_, DEPT_PROC_INST_ID_, CREATE_TIME_)
         VALUES (#{id, jdbcType=VARCHAR}, #{sessionId, jdbcType=VARCHAR}, #{parentCommTaskId, jdbcType=VARCHAR},
                 #{sourceTaskId, jdbcType=VARCHAR}, #{rootTaskId, jdbcType=VARCHAR},
+                #{sourceTaskDefKey, jdbcType=VARCHAR},
                 #{targetType, jdbcType=VARCHAR}, #{targetId, jdbcType=VARCHAR}, #{targetName, jdbcType=VARCHAR},
                 #{content, jdbcType=CLOB}, #{status, jdbcType=VARCHAR}, #{replyContent, jdbcType=CLOB},
                 #{replyUserId, jdbcType=VARCHAR}, #{replyTime, jdbcType=TIMESTAMP},
@@ -74,6 +76,16 @@
 
     <select id="selectBySourceTaskId" parameterType="string" resultMap="bizCommTaskResultMap">
         SELECT * FROM BIZ_COMM_TASK_ WHERE SOURCE_TASK_ID_ = #{sourceTaskId, jdbcType=VARCHAR}
+    </select>
+
+    <!-- 报表：按发起节点统计沟通量 -->
+    <select id="selectBySourceTaskDefKey" parameterType="string" resultMap="bizCommTaskResultMap">
+        SELECT * FROM BIZ_COMM_TASK_ WHERE SOURCE_TASK_DEF_KEY_ = #{sourceTaskDefKey, jdbcType=VARCHAR}
+        ORDER BY CREATE_TIME_ ASC
+    </select>
+
+    <select id="countBySourceTaskDefKey" parameterType="string" resultType="long">
+        SELECT COUNT(*) FROM BIZ_COMM_TASK_ WHERE SOURCE_TASK_DEF_KEY_ = #{sourceTaskDefKey, jdbcType=VARCHAR}
     </select>
 
     <select id="selectByCamundaTaskId" parameterType="string" resultMap="bizCommTaskResultMap">
