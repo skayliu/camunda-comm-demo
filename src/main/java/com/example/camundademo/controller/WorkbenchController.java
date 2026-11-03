@@ -1,6 +1,7 @@
 package com.example.camundademo.controller;
 
 import com.example.camundademo.security.CurrentUser;
+import com.example.camundademo.service.ProcessTraceService;
 import com.example.camundademo.service.WorkbenchService;
 import org.camunda.bpm.engine.TaskService;
 import org.camunda.bpm.engine.task.Task;
@@ -30,6 +31,9 @@ public class WorkbenchController {
 
     @Autowired
     private TaskService taskService;
+
+    @Autowired
+    private ProcessTraceService processTraceService;
 
     /** 当前登录用户信息（前端登录后填充头像区/权限区） */
     @GetMapping("/me")
@@ -84,5 +88,19 @@ public class WorkbenchController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "不能查看他人的待办");
         }
         return workbenchService.taskDetail(taskId, user);
+    }
+
+    /**
+     * 流程跟踪：BPMN 节点几何 + 每个节点的执行状态与执行明细（含沟通任务）。
+     *
+     * <p>可见范围与任务详情一致：只有发起人、办理过该实例任务的人以及当前待办处理人可查看。</p>
+     */
+    @GetMapping("/trace/{processInstanceId}")
+    public Map<String, Object> trace(@PathVariable String processInstanceId, Authentication authentication) {
+        String user = CurrentUser.require(authentication);
+        if (!processTraceService.canView(processInstanceId, user)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权查看该流程的跟踪信息");
+        }
+        return processTraceService.trace(processInstanceId);
     }
 }

@@ -157,6 +157,24 @@ class WorkbenchApiTest {
         return null;
     }
 
+    private Map<String, Object> nodeById(List<Map<String, Object>> nodes, String nodeId) {
+        for (Map<String, Object> node : nodes) {
+            if (nodeId.equals(node.get("nodeId"))) {
+                return node;
+            }
+        }
+        return null;
+    }
+
+    private boolean edgeTaken(List<Map<String, Object>> edges, String edgeId) {
+        for (Map<String, Object> edge : edges) {
+            if (edgeId.equals(edge.get("id"))) {
+                return Boolean.TRUE.equals(edge.get("taken"));
+            }
+        }
+        return false;
+    }
+
     @Test
     void workbenchEndToEnd() {
         // 0. 测试自建账号状态，避免依赖其他测试类遗留的身份数据
@@ -225,6 +243,64 @@ class WorkbenchApiTest {
         assertEquals("manager_review", commTask.get("sourceTaskDefKey"));
         assertEquals("PENDING", commTask.get("myCommStatus"));
 
+        // 9.1 流程跟踪：节点状态、几何、沟通任务归属都要能直接驱动前端高亮与悬停信息
+        Map<String, Object> trace = get("/api/wb/trace/" + pid, "manager");
+        assertEquals("approval", trace.get("processDefinitionKey"));
+        assertEquals("RUNNING", trace.get("state"));
+        assertEquals(true, trace.get("diagramAvailable"), "BPMN DI 应解析成功");
+        assertTrue(((Number) trace.get("diagramWidth")).doubleValue() > 0);
+
+        List<Map<String, Object>> traceNodes = (List<Map<String, Object>>) trace.get("nodes");
+        assertEquals(5, traceNodes.size(), "approval 流程应有 5 个可渲染节点: " + traceNodes);
+
+        Map<String, Object> applyNode = nodeById(traceNodes, "apply");
+        assertNotNull(applyNode, "跟踪图中缺少 apply 节点");
+        assertEquals("填写申请", applyNode.get("name"));
+        assertEquals("COMPLETED", applyNode.get("status"));
+        assertEquals("userTask", applyNode.get("type"));
+        assertEquals("用户任务", applyNode.get("typeLabel"));
+        assertNotNull(applyNode.get("startTime"), "已完成节点应带到达时间");
+        assertNotNull(applyNode.get("endTime"), "已完成节点应带完成时间");
+        assertTrue(((List<?>) applyNode.get("comments")).size() > 0, "apply 节点应带审批意见");
+
+        Map<String, Object> mgrNode = nodeById(traceNodes, "manager_review");
+        assertNotNull(mgrNode, "跟踪图中缺少 manager_review 节点");
+        assertEquals("ACTIVE", mgrNode.get("status"), "经理节点应处于执行中");
+        assertEquals(List.of("manager"), mgrNode.get("assignees"), "悬停信息应显示处理人");
+        assertTrue(((Number) mgrNode.get("x")).doubleValue() > 0, "节点应带 BPMN 坐标");
+        assertTrue(((Number) mgrNode.get("width")).doubleValue() > 0);
+        assertEquals(1, ((Number) mgrNode.get("pendingCommCount")).intValue(),
+                "经理节点应有 1 条待反馈沟通，实际 commTasks=" + mgrNode.get("commTasks"));
+        assertEquals(true, mgrNode.get("commLocked"), "存在待反馈沟通时节点应标记沟通中");
+        List<Map<String, Object>> nodeCommTasks = (List<Map<String, Object>>) mgrNode.get("commTasks");
+        assertEquals(1, nodeCommTasks.size(), "沟通任务应挂在来源节点 manager_review 上");
+        assertEquals(false, nodeCommTasks.get(0).get("isFollowUp"));
+        assertEquals("alice", nodeCommTasks.get(0).get("assignee"));
+
+        Map<String, Object> financeNode = nodeById(traceNodes, "finance_review");
+        assertNotNull(financeNode);
+        assertEquals("PENDING", financeNode.get("status"), "财务节点尚未到达");
+
+        List<Map<String, Object>> traceEdges = (List<Map<String, Object>>) trace.get("edges");
+        assertEquals(true, edgeTaken(traceEdges, "flow2"), "apply → manager_review 应已走过");
+        assertEquals(false, edgeTaken(traceEdges, "flow3"), "manager_review → finance_review 尚未走过");
+        for (Map<String, Object> e : traceEdges) {
+            assertTrue(((List<?>) e.get("waypoints")).size() >= 2, "连线应带路径点: " + e);
+        }
+
+        Map<?, ?> traceStats = (Map<?, ?>) trace.get("stats");
+        assertEquals(2, ((Number) traceStats.get("completed")).intValue(), "start 与 apply 已完成");
+        assertEquals(1, ((Number) traceStats.get("active")).intValue());
+        assertEquals(2, ((Number) traceStats.get("pending")).intValue());
+        assertEquals(1, ((Number) traceStats.get("commPending")).intValue());
+
+        // 参与过该实例的沟通反馈人也能查看；无关人员一律 403
+        ApiResponse aliceTrace = call(HttpMethod.GET, "/api/wb/trace/" + pid, null, "alice");
+        assertEquals(200, aliceTrace.status(), "沟通反馈人应能查看跟踪: " + aliceTrace.body());
+        ApiResponse outsiderTrace = call(HttpMethod.GET, "/api/wb/trace/" + pid, null, "finance");
+        assertEquals(403, outsiderTrace.status(),
+                "未参与该流程的用户应返回 403，实际: " + outsiderTrace.status());
+
         // 10. alice 反馈 → 沟通待办从待办列表消失、进入已办
         String commRecordId = (String) commTask.get("commRecordId");
         Map<String, Object> reply = new HashMap<>();
@@ -234,6 +310,19 @@ class WorkbenchApiTest {
 
         Map<String, Object> aliceTodoAfter = get("/api/wb/todo?type=all&page=1&size=50", "alice");
         assertEquals(null, findInPage(aliceTodoAfter, pid), "反馈后沟通待办应消失");
+
+        // 10.1 沟通反馈后，跟踪图上的待反馈数应实时归零，沟通记录仍保留在源节点
+        Map<String, Object> traceAfterReply = get("/api/wb/trace/" + pid, "manager");
+        Map<String, Object> mgrAfterReply = nodeById(
+                (List<Map<String, Object>>) traceAfterReply.get("nodes"), "manager_review");
+        assertNotNull(mgrAfterReply);
+        assertEquals(0, ((Number) mgrAfterReply.get("pendingCommCount")).intValue(),
+                "反馈后不应再有待反馈沟通");
+        assertEquals(false, mgrAfterReply.get("commLocked"));
+        List<Map<String, Object>> commTasksAfterReply =
+                (List<Map<String, Object>>) mgrAfterReply.get("commTasks");
+        assertEquals(1, commTasksAfterReply.size(), "沟通记录不应从跟踪图消失");
+        assertEquals("REPLIED", commTasksAfterReply.get(0).get("status"));
 
         Map<String, Object> aliceDone = get("/api/wb/done?page=1&size=50", "alice");
         Map<String, Object> doneItem = findInPage(aliceDone, pid);
