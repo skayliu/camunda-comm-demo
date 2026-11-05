@@ -89,6 +89,10 @@
               <b>{{ data.stats.commTotal }}</b>
               <span>沟通任务</span>
             </div>
+            <div v-if="data.stats.transferTotal" class="trace-stat is-transfer">
+              <b>{{ data.stats.transferTotal }}</b>
+              <span>转办次数</span>
+            </div>
           </div>
         </div>
 
@@ -101,7 +105,7 @@
             <span class="legend-item"><i class="dot pending"></i>未开始</span>
             <span class="legend-item"><i class="dot comm"></i>沟通中</span>
             <span class="legend-item"><i class="dot withdrawn"></i>已收回</span>
-            <span class="trace-hint">节点左上角图标＝任务类型 · 底部 ☐+＝子流程 · 右下角蓝色徽标＝可下钻子流程 · |||＝并行多实例 · ≡＝顺序多实例 · 拖动平移 · 滚轮缩放</span>
+            <span class="trace-hint">节点左上角图标＝任务类型 · 底部 ☐+＝子流程 · 右下角蓝色徽标＝可下钻子流程 · 上方橙色数字＝转办次数 · |||＝并行多实例 · ≡＝顺序多实例 · 拖动平移 · 滚轮缩放</span>
           </div>
         </div>
 
@@ -629,6 +633,27 @@
                 >{{ node.status === 'COMPLETED' ? '✓' : (node.status === 'ACTIVE' ? '▶' : '') }}</text>
               </g>
 
+              <!-- 转办标记：橙色圆点 + 次数，挂在节点上方的右侧。
+                   转办不改变节点状态，不能用状态色；放在节点外上方，避免与右上角状态角标、
+                   右下角沟通角标、底部 ☐+ / 多实例标记互相遮挡 -->
+              <g v-if="node.transferCount" class="trace-transfer-mark">
+                <title>已转办 {{ node.transferCount }} 次：{{ node.transferPath }}</title>
+                <circle
+                  :cx="node.x + node.width - 7"
+                  :cy="transferMarkCy(node)"
+                  r="7"
+                  fill="#fa8c16"
+                  stroke="#fff"
+                  stroke-width="1.5"
+                />
+                <text
+                  :x="node.x + node.width - 7"
+                  :y="transferMarkCy(node) + 3.4"
+                  text-anchor="middle"
+                  class="trace-transfer-badge"
+                >{{ node.transferCount > 9 ? '9+' : node.transferCount }}</text>
+              </g>
+
               <!-- 沟通任务角标：待反馈（橙）/ 已收回（灰）/ 已反馈（紫），三者互斥优先展示 -->
               <g v-if="node.commTasks && node.commTasks.length">
                 <rect
@@ -722,6 +747,10 @@
             <div v-if="tipNode.executionCount > 1" class="trace-tip-row">
               <span>执行次数</span><b>{{ tipNode.executionCount }} 次</b>
             </div>
+            <div v-if="tipNode.transferCount" class="trace-tip-row">
+              <span>转办</span>
+              <b>{{ tipNode.transferCount }} 次 · {{ tipNode.transferPath }}</b>
+            </div>
             <div v-if="tipNode.commTasks && tipNode.commTasks.length" class="trace-tip-row">
               <span>沟通任务</span>
               <b>{{ tipNode.commTasks.length }} 条{{ commSummaryText(tipNode) }}</b>
@@ -778,7 +807,7 @@
             :pagination="false"
             size="small"
             row-key="nodeId"
-            :scroll="{ x: 720, y: tableScrollY }"
+            :scroll="{ x: 790, y: tableScrollY }"
             :row-class-name="rowClassName"
             :custom-row="customRow"
             :expanded-row-keys="expandedKeys"
@@ -799,7 +828,18 @@
                 <a-tag :color="statusColor(record)">{{ statusText(record) }}</a-tag>
               </template>
               <template v-else-if="column.key === 'assignee'">
-                {{ record.assignees.length ? record.assignees.join('、') : '—' }}
+                <div>{{ record.assignees.length ? record.assignees.join('、') : '—' }}</div>
+                <!-- 转办不会改变任务 ID，只是换了 assignee，所以这里补一条链才能看出「谁交给谁」 -->
+                <div v-if="record.transferCount" class="trace-transfer-line">
+                  <a-tag
+                    color="orange"
+                    class="trace-transfer-tag"
+                    @click.stop="toggleExpandRow(record)"
+                  >转办 {{ record.transferCount }} 次</a-tag>
+                  <span class="trace-transfer-path" :title="record.transferPath">
+                    {{ record.transferPath }}
+                  </span>
+                </div>
               </template>
               <template v-else-if="column.key === 'time'">
                 <div>{{ fmt(record.startTime) }}</div>
@@ -827,9 +867,32 @@
               </template>
             </template>
 
-            <!-- 行内展开：该节点发起的沟通会话明细 -->
+            <!-- 行内展开：该节点的转办链 + 发起的沟通会话明细 -->
             <template #expandedRowRender="{ record }">
-              <div class="trace-comm-panel">
+              <div class="trace-extra-panel">
+                <div v-if="record.transferCount" class="trace-transfer-panel">
+                  <div class="trace-extra-title">
+                    转办记录
+                    <span class="trace-extra-count">{{ record.transferCount }} 次</span>
+                    <span v-if="record.transferPath" class="trace-transfer-summary">
+                      {{ record.transferPath }}
+                    </span>
+                  </div>
+                  <div
+                    v-for="(item, i) in record.transfers"
+                    :key="item.id || `transfer-${i}`"
+                    class="trace-transfer-item"
+                  >
+                    <div class="trace-transfer-meta">
+                      <span class="trace-transfer-user">{{ item.from || '—' }}</span>
+                      <span class="trace-transfer-arrow">→</span>
+                      <span class="trace-transfer-user is-to">{{ item.to || '—' }}</span>
+                      <span class="trace-transfer-time">{{ fmtShort(item.createTime) }}</span>
+                    </div>
+                    <div v-if="item.reason" class="trace-transfer-reason">{{ item.reason }}</div>
+                  </div>
+                </div>
+                <div v-if="record.commTasks && record.commTasks.length" class="trace-comm-panel">
                 <div
                   v-for="session in commSessions(record)"
                   :key="session.key"
@@ -895,8 +958,6 @@
                     </div>
                   </div>
                 </div>
-                <div v-if="!record.commTasks || !record.commTasks.length" class="muted">
-                  该节点没有沟通记录
                 </div>
               </div>
             </template>
@@ -1039,7 +1100,7 @@ const tipStyle = ref({})
 const columns = [
   { title: '节点', key: 'name', width: 200 },
   { title: '状态', key: 'status', width: 110 },
-  { title: '处理人', key: 'assignee', width: 140 },
+  { title: '处理人', key: 'assignee', width: 190 },
   { title: '开始 / 结束', key: 'time', width: 190 },
   { title: '停留时长', key: 'duration', width: 130 },
   { title: '意见 / 沟通', key: 'memo', width: 240, ellipsis: true }
@@ -1263,6 +1324,7 @@ const EXPORT_DETAIL_COLS = [
   { key: 'name', label: '节点', flex: true },
   { key: 'status', label: '状态', width: 58 },
   { key: 'assignee', label: '处理人', width: 104 },
+  { key: 'transfer', label: '转办', width: 112 },
   { key: 'start', label: '开始时间', width: 112 },
   { key: 'end', label: '结束时间', width: 112 },
   { key: 'duration', label: '停留时长', width: 88 }
@@ -1304,6 +1366,7 @@ function exportDetailRows() {
     status: statusText(n),
     statusColor: colorOf[statusColor(n)] || EXPORT_COLORS.muted,
     assignee: n.assignees && n.assignees.length ? n.assignees.join('、') : '—',
+    transfer: n.transferCount ? `${n.transferCount} 次 ${n.transferPath || ''}`.trim() : '—',
     start: n.startTime ? fmtShort(n.startTime) : '—',
     end: n.endTime ? fmtShort(n.endTime) : '—',
     duration: duration(n.durationInMillis, n.startTime)
@@ -1976,9 +2039,12 @@ function statusColor(node) {
   return 'default'
 }
 
-// ===== 沟通明细（行内展开） =====
+// ===== 沟通 / 转办明细（行内展开） =====
+// 转办记录以前只在待办详情里能看到，跟踪图上完全没有入口；现在有转办的节点
+// 也能展开查看完整链条，与沟通记录共用同一块展开区。
 function rowExpandable(record) {
-  return !!(record && record.commTasks && record.commTasks.length)
+  if (!record) return false
+  return !!((record.commTasks && record.commTasks.length) || record.transferCount)
 }
 
 function onExpand(expanded, record) {
@@ -2539,6 +2605,11 @@ function drillBadgeY(node) {
   return clampBadge(node.y + node.height + 3, data.value ? data.value.diagramHeight : null)
 }
 
+// 转办角标挂在节点上方，节点贴近画布顶边时向内收，避免被 viewBox 裁掉
+function transferMarkCy(node) {
+  return Math.max(node.y - 8, 9)
+}
+
 // 白色箭头：一条 45° 斜线 + 右下折角，表示「进入下一层」
 function drillBadgeArrow(node) {
   const x = drillBadgeX(node)
@@ -2914,6 +2985,95 @@ onBeforeUnmount(() => {
 }
 .trace-stat.is-active b {
   color: #1677ff;
+}
+.trace-stat.is-transfer b {
+  color: #fa8c16;
+}
+/* ===== 转办：明细列、展开链、图上角标 ===== */
+.trace-transfer-line {
+  margin-top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.trace-transfer-tag {
+  margin-inline-end: 0;
+  cursor: pointer;
+  flex: none;
+}
+.trace-transfer-path {
+  font-size: 11px;
+  color: #8c8c8c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trace-extra-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.trace-transfer-panel {
+  padding: 2px 2px 4px;
+}
+.trace-extra-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f1f1f;
+  margin-bottom: 6px;
+}
+.trace-extra-count {
+  margin-left: 6px;
+  font-weight: 400;
+  color: #fa8c16;
+}
+.trace-transfer-summary {
+  margin-left: 8px;
+  font-weight: 400;
+  font-size: 11px;
+  color: #8c8c8c;
+}
+.trace-transfer-item {
+  padding: 6px 10px;
+  border-left: 2px solid #ffd591;
+  background: #fffbf5;
+  border-radius: 0 6px 6px 0;
+  margin-bottom: 6px;
+}
+.trace-transfer-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.trace-transfer-user {
+  font-weight: 500;
+  color: #434343;
+}
+.trace-transfer-user.is-to {
+  color: #d46b08;
+}
+.trace-transfer-arrow {
+  color: #bfbfbf;
+}
+.trace-transfer-time {
+  margin-left: auto;
+  font-size: 11px;
+  color: #8c8c8c;
+}
+.trace-transfer-reason {
+  margin-top: 3px;
+  font-size: 12px;
+  color: #595959;
+  white-space: pre-wrap;
+}
+.trace-transfer-badge {
+  font-size: 9px;
+  font-weight: 600;
+  fill: #fff;
+  pointer-events: none;
 }
 .trace-toolbar {
   display: flex;

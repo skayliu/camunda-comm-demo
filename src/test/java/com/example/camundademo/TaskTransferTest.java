@@ -284,5 +284,21 @@ class TaskTransferTest {
                 Map.of("targetUserId", "carol"), "bob").body());
         assertEquals("ok", afterWithdraw.get("result"), "收回沟通后应可转办: " + afterWithdraw);
         assertEquals("carol", taskService.createTaskQuery().taskId(taskId).singleResult().getAssignee());
+
+        // 10. 已办列表同样要带转办次数：carol 是最后经手人，办完后列表行应显示这条任务转过 2 次
+        taskService.complete(taskId);
+        Map<String, Object> carolDone = parseObject(call(HttpMethod.GET, "/api/wb/done", null, "carol").body());
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> doneList = (List<Map<String, Object>>) carolDone.get("list");
+        Map<String, Object> doneRow = doneList.stream()
+                .filter(item -> taskId.equals(item.get("taskId")))
+                .findFirst().orElse(null);
+        assertNotNull(doneRow, "接收人办完后已办列表里应有这条任务");
+        assertEquals(2, ((Number) doneRow.get("transferCount")).intValue(),
+                "已办列表未返回转办次数，前端标签不会显示");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> doneLast = (Map<String, Object>) doneRow.get("lastTransfer");
+        assertEquals("bob", doneLast.get("from"));
+        assertEquals("carol", doneLast.get("to"));
     }
 }

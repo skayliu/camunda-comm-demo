@@ -369,6 +369,29 @@ public class ProcessTraceService {
                     .add(toWithdrawnCommVO(record, initiator, sourceKey));
         }
 
+        // 转办记录：转办只改 assignee，任务 ID 不变，按 taskId 归集即可精确落到节点上。
+        // 任务被删除（如收回沟通）时历史任务里查不到，再用 taskDefKey 兜底。
+        // 整个实例只查一次，避免每个节点都访问业务表。
+        List<Map<String, Object>> instanceTransfers = Collections.emptyList();
+        try {
+            instanceTransfers = taskTransferService.listByProcessInstanceId(processInstanceId);
+        } catch (RuntimeException ex) {
+            // 老库缺 BIZ_TASK_TRANSFER_ 表时不能让整张跟踪图挂掉，仅损失转办信息
+            LOG.log(Level.WARNING, "加载转办记录失败，processInstanceId=" + processInstanceId, ex);
+        }
+        Map<String, List<Map<String, Object>>> transferByTaskId = new LinkedHashMap<>();
+        Map<String, List<Map<String, Object>>> transferByDefKey = new LinkedHashMap<>();
+        for (Map<String, Object> t : instanceTransfers) {
+            Object taskId = t.get("taskId");
+            if (taskId != null) {
+                transferByTaskId.computeIfAbsent(String.valueOf(taskId), k -> new ArrayList<>()).add(t);
+            }
+            Object defKey = t.get("taskDefKey");
+            if (defKey != null) {
+                transferByDefKey.computeIfAbsent(String.valueOf(defKey), k -> new ArrayList<>()).add(t);
+            }
+        }
+
         List<Map<String, Object>> nodes = new ArrayList<>();
         List<String> activeNodeIds = new ArrayList<>();
         List<String> completedNodeIds = new ArrayList<>();
@@ -377,6 +400,7 @@ public class ProcessTraceService {
         int activeCount = 0;
         int commTotal = 0;
         int commPending = 0;
+        int transferTotal = 0;
 
         for (NodeShape shape : diagram.shapes) {
             List<HistoricActivityInstance> instances = byNode.getOrDefault(shape.id, Collections.emptyList());
@@ -458,6 +482,39 @@ public class ProcessTraceService {
             node.put("executionCount", instances.size());
             node.put("executions", executions);
             node.put("comments", comments);
+
+            // 该节点的转办记录：先按任务 ID 精确归集（同一节点多次执行时各是各的链），
+            // 再补只在业务表里留下记录、历史任务已被删除的，按记录 ID 去重。
+            List<Map<String, Object>> nodeTransfers = new ArrayList<>();
+            Set<String> seenTransferIds = new LinkedHashSet<>();
+            for (HistoricActivityInstance a : instances) {
+                if (a.getTaskId() == null) {
+                    continue;
+                }
+                for (Map<String, Object> t : transferByTaskId.getOrDefault(a.getTaskId(), Collections.emptyList())) {
+                    if (seenTransferIds.add(String.valueOf(t.get("id")))) {
+                        nodeTransfers.add(t);
+                    }
+                }
+            }
+            for (Map<String, Object> t : transferByDefKey.getOrDefault(shape.id, Collections.emptyList())) {
+                if (seenTransferIds.add(String.valueOf(t.get("id")))) {
+                    nodeTransfers.add(t);
+                }
+            }
+            nodeTransfers.sort((a, b) -> {
+                Object ta = a.get("createTime");
+                Object tb = b.get("createTime");
+                if (ta instanceof Date && tb instanceof Date) {
+                    return ((Date) ta).compareTo((Date) tb);
+                }
+                return 0;
+            });
+            node.put("transfers", nodeTransfers);
+            node.put("transferCount", nodeTransfers.size());
+            // 「原办理人 → 接收人 → …」，前端明细与悬停直接展示，不必自己拼
+            node.put("transferPath", transferPath(nodeTransfers));
+            transferTotal += nodeTransfers.size();
 
             // 调用子流程下钻：callActivity 的历史活动上记录了被调起的子流程实例 ID。
             // 父子关系只存在于 ACT_HI_ACTINST.CALL_PROC_INST_ID_，ACT_HI_PROCINST 没有父实例字段，
@@ -545,8 +602,43 @@ public class ProcessTraceService {
         stats.put("pending", nodes.size() - completedCount - activeCount);
         stats.put("commTotal", commTotal);
         stats.put("commPending", commPending);
+        stats.put("transferTotal", transferTotal);
         result.put("stats", stats);
         return result;
+    }
+
+    /**
+     * 把转办记录拼成「原办理人 → 接收人 → …」。
+     *
+     * <p>每条转办记录同时带 from / to，按 taskId 分组后顺序串联即可得到完整链条；
+     * 同一节点被执行多次（循环、多实例）时，各组之间用「；」分隔，避免两条链首尾错误相连。</p>
+     */
+    private String transferPath(List<Map<String, Object>> transfers) {
+        if (transfers == null || transfers.isEmpty()) {
+            return null;
+        }
+        Map<String, List<Map<String, Object>>> byTask = new LinkedHashMap<>();
+        for (Map<String, Object> t : transfers) {
+            byTask.computeIfAbsent(String.valueOf(t.get("taskId")), k -> new ArrayList<>()).add(t);
+        }
+        List<String> chains = new ArrayList<>();
+        for (List<Map<String, Object>> chain : byTask.values()) {
+            List<String> path = new ArrayList<>();
+            for (Map<String, Object> t : chain) {
+                String from = t.get("from") == null ? null : String.valueOf(t.get("from"));
+                String to = t.get("to") == null ? null : String.valueOf(t.get("to"));
+                if (path.isEmpty() && from != null) {
+                    path.add(from);
+                }
+                if (to != null && (path.isEmpty() || !to.equals(path.get(path.size() - 1)))) {
+                    path.add(to);
+                }
+            }
+            if (!path.isEmpty()) {
+                chains.add(String.join(" → ", path));
+            }
+        }
+        return chains.isEmpty() ? null : String.join("；", chains);
     }
 
     /**

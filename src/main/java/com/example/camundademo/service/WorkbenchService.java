@@ -338,6 +338,18 @@ public class WorkbenchService {
             }
             list.add(vo);
         }
+        // 转办次数整页一次批量取，避免每行查库；已办里的任务同样可能是“别人转给我办完的”，
+        // 列表上要能直接看出这条记录经手过几次转办（详情里的转办链另由 taskId/实例查询）。
+        Map<String, List<Map<String, Object>>> transfers = taskTransferService.groupByTaskIds(
+                list.stream().map(vo -> String.valueOf(vo.get("taskId"))).toList());
+        for (Map<String, Object> vo : list) {
+            List<Map<String, Object>> chain = transfers.get(String.valueOf(vo.get("taskId")));
+            if (chain == null || chain.isEmpty()) {
+                continue;
+            }
+            vo.put("transferCount", chain.size());
+            vo.put("lastTransfer", chain.get(chain.size() - 1));
+        }
         return pageResult(list, page, size);
     }
 
