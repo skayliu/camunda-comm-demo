@@ -3,10 +3,12 @@ package com.example.camundademo.config;
 import com.example.camundademo.entity.BizCommSession;
 import com.example.camundademo.entity.BizCommTask;
 import com.example.camundademo.entity.BizTaskExt;
+import com.example.camundademo.entity.BizTaskTransfer;
 import com.example.camundademo.interceptor.CommunicationCommandInterceptor;
 import com.example.camundademo.persistence.BizCommSessionManager;
 import com.example.camundademo.persistence.BizCommTaskManager;
 import com.example.camundademo.persistence.BizTaskExtManager;
+import com.example.camundademo.persistence.BizTaskTransferManager;
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.camunda.bpm.engine.impl.bpmn.parser.BpmnParseListener;
@@ -34,7 +36,8 @@ public class CommProcessEnginePlugin extends AbstractProcessEnginePlugin {
     private static final String[] MAPPER_RESOURCES = {
             "mapper/BizTaskExt.xml",
             "mapper/BizCommSession.xml",
-            "mapper/BizCommTask.xml"
+            "mapper/BizCommTask.xml",
+            "mapper/BizTaskTransfer.xml"
     };
 
     @Override
@@ -56,6 +59,7 @@ public class CommProcessEnginePlugin extends AbstractProcessEnginePlugin {
         sessionFactories.add(new BizTaskExtManager.Factory());
         sessionFactories.add(new BizCommSessionManager.Factory());
         sessionFactories.add(new BizCommTaskManager.Factory());
+        sessionFactories.add(new BizTaskTransferManager.Factory());
 
         // 3. 注册自定义命令拦截器（审批时校验沟通状态）
         // 必须放入 post 链：它位于 CommandContextInterceptor 之后，
@@ -98,6 +102,11 @@ public class CommProcessEnginePlugin extends AbstractProcessEnginePlugin {
         updateMappings.put(BizCommTask.class, "updateBizCommTask");
         deleteMappings.put(BizCommTask.class, "deleteBizCommTask");
         selectMappings.put(BizCommTask.class, "selectBizCommTask");
+
+        insertMappings.put(BizTaskTransfer.class, "insertBizTaskTransfer");
+        updateMappings.put(BizTaskTransfer.class, "updateBizTaskTransfer");
+        deleteMappings.put(BizTaskTransfer.class, "deleteBizTaskTransfer");
+        selectMappings.put(BizTaskTransfer.class, "selectBizTaskTransfer");
 
         dbSqlSessionFactory.setInsertStatements(insertMappings);
         dbSqlSessionFactory.setUpdateStatements(updateMappings);

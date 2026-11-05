@@ -47,6 +47,9 @@
               <a-tag v-if="record.isCommTask" :color="record.isFollowUp ? 'gold' : 'purple'">
                 {{ record.isFollowUp ? '追问' : '首轮沟通' }}
               </a-tag>
+              <a-tag v-if="record.transferCount" color="cyan">
+                已转办 {{ record.transferCount }} 次
+              </a-tag>
             </a-space>
           </template>
 
@@ -82,11 +85,7 @@
       </a-table>
     </a-card>
 
-    <a-drawer
-      v-model:open="detailOpen"
-      :width="isMobile ? '100%' : 560"
-      title="已办详情"
-    >
+    <DetailDrawer v-model:open="detailOpen" title="已办详情" :width="560">
       <template v-if="current">
         <a-descriptions :column="1" bordered size="small">
           <a-descriptions-item label="流程">
@@ -118,8 +117,17 @@
           </a-descriptions-item>
         </a-descriptions>
 
-        <div class="drawer-section" style="margin-top: 20px">
-          <div class="drawer-section-title">审批意见</div>
+        <!-- 转办记录：已办里最后一条接收人是历史办理人，不能标成「当前办理人」 -->
+        <DetailSection
+          v-if="transfers.length"
+          title="转办记录"
+          :extra="`共 ${transfers.length} 次`"
+          style="margin-top: 20px"
+        >
+          <TransferChain :transfers="transfers" />
+        </DetailSection>
+
+        <DetailSection title="审批意见" :style="{ marginTop: transfers.length ? '' : '20px' }">
           <div v-if="current.comments && current.comments.length" class="comm-bubble">
             <div v-for="c in current.comments" :key="c.id" style="margin-bottom: 8px">
               <div style="color: rgba(0, 0, 0, 0.45); font-size: 12px">
@@ -129,9 +137,13 @@
             </div>
           </div>
           <div v-else class="empty-tip">未填写审批意见</div>
-        </div>
+        </DetailSection>
       </template>
-    </a-drawer>
+
+      <template #footer>
+        <a-button @click="detailOpen = false">关闭</a-button>
+      </template>
+    </DetailDrawer>
 
     <ProcessTraceModal v-model:open="traceOpen" :process-instance-id="tracePid" />
   </div>
@@ -144,6 +156,9 @@ import dayjs from 'dayjs'
 import { ReloadOutlined } from '@ant-design/icons-vue'
 import { errorText, wbApi } from '../api'
 import ProcessTraceModal from '../components/ProcessTraceModal.vue'
+import DetailDrawer from '../components/DetailDrawer.vue'
+import DetailSection from '../components/DetailSection.vue'
+import TransferChain from '../components/TransferChain.vue'
 
 const loading = ref(false)
 const rows = ref([])
@@ -153,7 +168,7 @@ const size = ref(10)
 const total = ref(0)
 const detailOpen = ref(false)
 const current = ref(null)
-const isMobile = ref(window.innerWidth <= 768)
+const transfers = ref([])
 const traceOpen = ref(false)
 const tracePid = ref('')
 
@@ -225,7 +240,18 @@ function onTableChange(pag) {
 
 function openDetail(record) {
   current.value = record
+  transfers.value = []
   detailOpen.value = true
+  loadTransfers(record.taskId)
+}
+
+// 转办链是附加信息：接口失败（例如历史任务已无权限）只留空，不打断详情展示
+async function loadTransfers(taskId) {
+  try {
+    transfers.value = (await wbApi.transfers(taskId)) || []
+  } catch (e) {
+    transfers.value = []
+  }
 }
 
 function openTrace(record) {

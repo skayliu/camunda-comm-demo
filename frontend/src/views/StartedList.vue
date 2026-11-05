@@ -97,7 +97,7 @@
       </a-table>
     </a-card>
 
-    <a-drawer v-model:open="detailOpen" :width="isMobile ? '100%' : 560" title="发起详情">
+    <DetailDrawer v-model:open="detailOpen" title="发起详情" :width="560">
       <template v-if="current">
         <a-descriptions :column="1" bordered size="small">
           <a-descriptions-item label="流程">{{ current.processTitle }}</a-descriptions-item>
@@ -120,8 +120,17 @@
           </a-descriptions-item>
         </a-descriptions>
 
-        <div class="drawer-section" style="margin-top: 20px">
-          <div class="drawer-section-title">当前节点</div>
+        <!-- 一个流程实例可能包含多条待办、多次转办，这里按实例汇总展示 -->
+        <DetailSection
+          v-if="transfers.length"
+          title="转办记录"
+          :extra="`共 ${transfers.length} 次`"
+          style="margin-top: 20px"
+        >
+          <TransferChain :transfers="transfers" />
+        </DetailSection>
+
+        <DetailSection title="当前节点" :style="{ marginTop: transfers.length ? '' : '20px' }">
           <div v-if="current.currentTasks && current.currentTasks.length">
             <div
               v-for="t in current.currentTasks"
@@ -141,9 +150,13 @@
             </div>
           </div>
           <div v-else class="empty-tip">流程已结束，无待处理节点</div>
-        </div>
+        </DetailSection>
       </template>
-    </a-drawer>
+
+      <template #footer>
+        <a-button @click="detailOpen = false">关闭</a-button>
+      </template>
+    </DetailDrawer>
 
     <ProcessTraceModal v-model:open="traceOpen" :process-instance-id="tracePid" />
   </div>
@@ -158,6 +171,9 @@ import 'dayjs/locale/zh-cn'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons-vue'
 import { commApi, errorText, wbApi } from '../api'
 import ProcessTraceModal from '../components/ProcessTraceModal.vue'
+import DetailDrawer from '../components/DetailDrawer.vue'
+import DetailSection from '../components/DetailSection.vue'
+import TransferChain from '../components/TransferChain.vue'
 
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
@@ -171,7 +187,7 @@ const size = ref(10)
 const total = ref(0)
 const detailOpen = ref(false)
 const current = ref(null)
-const isMobile = ref(window.innerWidth <= 768)
+const transfers = ref([])
 const traceOpen = ref(false)
 const tracePid = ref('')
 
@@ -236,7 +252,18 @@ function onTableChange(pag) {
 
 function openDetail(record) {
   current.value = record
+  transfers.value = []
   detailOpen.value = true
+  loadTransfers(record.processInstanceId)
+}
+
+// 转办链是附加信息：接口失败只留空，不打断详情展示
+async function loadTransfers(processInstanceId) {
+  try {
+    transfers.value = (await wbApi.processTransfers(processInstanceId)) || []
+  } catch (e) {
+    transfers.value = []
+  }
 }
 
 function openTrace(record) {

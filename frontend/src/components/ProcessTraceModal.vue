@@ -32,6 +32,21 @@
     <a-spin :spinning="loading" class="trace-spin">
       <template v-if="data">
         <div class="trace-body">
+        <!-- 子流程下钻层级：调用子流程可层层下钻，用面包屑回到任意上级，避免迷路 -->
+        <div v-if="drillTrail.length" class="trace-drill-bar">
+          <a-button type="link" size="small" class="trace-drill-back" @click="drillUp">
+            <template #icon><ArrowLeftOutlined /></template>
+            返回上级流程
+          </a-button>
+          <span class="trace-drill-path">
+            <template v-for="(item, i) in drillTrail" :key="item.processInstanceId">
+              <a class="trace-drill-crumb" @click="drillTo(i)">{{ item.name }}</a>
+              <span class="trace-drill-sep">/</span>
+            </template>
+            <span class="trace-drill-current">{{ data.processTitle }}</span>
+          </span>
+          <span class="trace-drill-tip">第 {{ drillTrail.length }} 层子流程</span>
+        </div>
         <!-- 概览 + 工具栏 + 流程图：可整体收起，把高度让给节点执行明细 -->
         <div v-show="!collapsed" class="trace-top">
         <!-- 概览 -->
@@ -86,7 +101,7 @@
             <span class="legend-item"><i class="dot pending"></i>未开始</span>
             <span class="legend-item"><i class="dot comm"></i>沟通中</span>
             <span class="legend-item"><i class="dot withdrawn"></i>已收回</span>
-            <span class="trace-hint">拖动平移 · 滚轮缩放</span>
+            <span class="trace-hint">节点左上角图标＝任务类型 · 底部 ☐+＝子流程 · 右下角蓝色徽标＝可下钻子流程 · |||＝并行多实例 · ≡＝顺序多实例 · 拖动平移 · 滚轮缩放</span>
           </div>
         </div>
 
@@ -132,7 +147,7 @@
             </a-tooltip>
             <span class="trace-canvas-tools-split"></span>
             <a-tooltip title="刷新跟踪数据">
-              <a-button size="small" type="text" class="trace-tool-btn" :loading="loading" @click="load">
+              <a-button size="small" type="text" class="trace-tool-btn" :loading="loading" @click="load()">
                 <template #icon><ReloadOutlined /></template>
               </a-button>
             </a-tooltip>
@@ -276,15 +291,148 @@
                   :fill="nodeFill(node)"
                   :stroke="nodeStroke(node)"
                   :stroke-width="node.type === 'endEvent' ? 3 : 2"
+                  :stroke-dasharray="isNonInterruptingBoundary(node) ? '4 3' : null"
                 />
+                <!-- 中间事件 / 边界事件是双圈：开始事件单圈，结束事件粗圈 -->
                 <circle
-                  v-if="node.type === 'endEvent'"
+                  v-if="isDoubleRing(node)"
                   :cx="cx(node)"
                   :cy="cy(node)"
-                  :r="node.width / 2 - 4.5"
-                  :fill="nodeStroke(node)"
-                  opacity="0.9"
+                  :r="node.width / 2 - 3.6"
+                  fill="none"
+                  :stroke="nodeStroke(node)"
+                  stroke-width="1.3"
+                  :stroke-dasharray="isNonInterruptingBoundary(node) ? '3 2' : null"
                 />
+                <!-- 终止结束事件 = 粗圈内实心圆，这是 BPMN 对 terminate 的专属标记。
+                     此前这里对所有结束事件无条件画实心圆，导致普通结束事件也长成实心圆、
+                     错误/信号/消息等结束事件的图标被实心底色盖住，全部退化成同一个样子。 -->
+                <circle
+                  v-if="isTerminateEnd(node)"
+                  :cx="cx(node)"
+                  :cy="cy(node)"
+                  :r="node.width / 2 - 5.6"
+                  :fill="nodeStroke(node)"
+                  stroke="none"
+                />
+                <!-- 事件定义图标：定时=时钟、消息=信封、信号=三角…… -->
+                <g
+                  v-if="node.eventDefinition"
+                  class="trace-event-mark"
+                  fill="none"
+                  :stroke="nodeStroke(node)"
+                  stroke-width="1.5"
+                  stroke-linejoin="round"
+                  stroke-linecap="round"
+                >
+                  <template v-if="node.eventDefinition === 'timer'">
+                    <circle :cx="cx(node)" :cy="cy(node)" :r="node.width * 0.26" />
+                    <line
+                      :x1="cx(node)"
+                      :y1="cy(node)"
+                      :x2="cx(node)"
+                      :y2="cy(node) - node.width * 0.17"
+                    />
+                    <line
+                      :x1="cx(node)"
+                      :y1="cy(node)"
+                      :x2="cx(node) + node.width * 0.13"
+                      :y2="cy(node)"
+                    />
+                  </template>
+                  <template v-else-if="node.eventDefinition === 'message'">
+                    <rect
+                      :x="cx(node) - node.width * 0.23"
+                      :y="cy(node) - node.width * 0.16"
+                      :width="node.width * 0.46"
+                      :height="node.width * 0.32"
+                      rx="1.5"
+                    />
+                    <polyline
+                      :points="`${cx(node) - node.width * 0.23},${cy(node) - node.width * 0.16} ${cx(node)},${cy(node) + node.width * 0.04} ${cx(node) + node.width * 0.23},${cy(node) - node.width * 0.16}`"
+                    />
+                  </template>
+                  <template v-else-if="node.eventDefinition === 'signal'">
+                    <polygon
+                      :points="`${cx(node)},${cy(node) - node.width * 0.2} ${cx(node) + node.width * 0.2},${cy(node) + node.width * 0.16} ${cx(node) - node.width * 0.2},${cy(node) + node.width * 0.16}`"
+                    />
+                  </template>
+                  <template v-else-if="node.eventDefinition === 'conditional'">
+                    <rect
+                      :x="cx(node) - node.width * 0.22"
+                      :y="cy(node) - node.width * 0.18"
+                      :width="node.width * 0.44"
+                      :height="node.width * 0.36"
+                      rx="1.5"
+                    />
+                    <line
+                      :x1="cx(node) - node.width * 0.13"
+                      :y1="cy(node) - node.width * 0.07"
+                      :x2="cx(node) + node.width * 0.13"
+                      :y2="cy(node) - node.width * 0.07"
+                    />
+                    <line
+                      :x1="cx(node) - node.width * 0.13"
+                      :y1="cy(node)"
+                      :x2="cx(node) + node.width * 0.13"
+                      :y2="cy(node)"
+                    />
+                    <line
+                      :x1="cx(node) - node.width * 0.13"
+                      :y1="cy(node) + node.width * 0.07"
+                      :x2="cx(node) + node.width * 0.13"
+                      :y2="cy(node) + node.width * 0.07"
+                    />
+                  </template>
+                  <template v-else-if="node.eventDefinition === 'error'">
+                    <polygon
+                      :points="`${cx(node) + node.width * 0.05},${cy(node) - node.width * 0.22} ${cx(node) - node.width * 0.13},${cy(node) + node.width * 0.02} ${cx(node) - node.width * 0.01},${cy(node) + node.width * 0.02} ${cx(node) - node.width * 0.06},${cy(node) + node.width * 0.22} ${cx(node) + node.width * 0.13},${cy(node) - node.width * 0.03} ${cx(node) + node.width * 0.01},${cy(node) - node.width * 0.03}`"
+                      fill="currentColor"
+                      :style="{ fill: nodeStroke(node), stroke: 'none' }"
+                    />
+                  </template>
+                  <template v-else-if="node.eventDefinition === 'escalation'">
+                    <polygon
+                      :points="`${cx(node)},${cy(node) - node.width * 0.22} ${cx(node) + node.width * 0.19},${cy(node) + node.width * 0.04} ${cx(node) + node.width * 0.06},${cy(node) + node.width * 0.04} ${cx(node) + node.width * 0.06},${cy(node) + node.width * 0.2} ${cx(node) - node.width * 0.06},${cy(node) + node.width * 0.2} ${cx(node) - node.width * 0.06},${cy(node) + node.width * 0.04} ${cx(node) - node.width * 0.19},${cy(node) + node.width * 0.04}`"
+                    />
+                  </template>
+                  <!-- 终止结束事件已由外层实心圆表达，这里不再重复画 -->
+                  <template v-else-if="node.eventDefinition === 'cancel'">
+                    <!-- 取消结束事件：圈内交叉叉号 -->
+                    <line
+                      :x1="cx(node) - node.width * 0.15"
+                      :y1="cy(node) - node.width * 0.15"
+                      :x2="cx(node) + node.width * 0.15"
+                      :y2="cy(node) + node.width * 0.15"
+                    />
+                    <line
+                      :x1="cx(node) + node.width * 0.15"
+                      :y1="cy(node) - node.width * 0.15"
+                      :x2="cx(node) - node.width * 0.15"
+                      :y2="cy(node) + node.width * 0.15"
+                    />
+                  </template>
+                  <template v-else-if="node.eventDefinition === 'compensate'">
+                    <!-- 补偿标记：两枚同向（尖朝左）三角并排，BPMN 规范画法 -->
+                    <polygon
+                      :points="`${cx(node) - node.width * 0.21},${cy(node)} ${cx(node) - node.width * 0.03},${cy(node) - node.width * 0.15} ${cx(node) - node.width * 0.03},${cy(node) + node.width * 0.15}`"
+                    />
+                    <polygon
+                      :points="`${cx(node) + node.width * 0.01},${cy(node)} ${cx(node) + node.width * 0.19},${cy(node) - node.width * 0.15} ${cx(node) + node.width * 0.19},${cy(node) + node.width * 0.15}`"
+                    />
+                  </template>
+                  <template v-else-if="node.eventDefinition === 'link'">
+                    <line
+                      :x1="cx(node) - node.width * 0.18"
+                      :y1="cy(node)"
+                      :x2="cx(node) + node.width * 0.14"
+                      :y2="cy(node)"
+                    />
+                    <polyline
+                      :points="`${cx(node) + node.width * 0.06},${cy(node) - node.width * 0.08} ${cx(node) + node.width * 0.16},${cy(node)} ${cx(node) + node.width * 0.06},${cy(node) + node.width * 0.08}`"
+                    />
+                  </template>
+                </g>
                 <text
                   :x="cx(node)"
                   :y="node.y + node.height + 14"
@@ -325,11 +473,128 @@
                   :y="node.y"
                   :width="node.width"
                   :height="node.height"
-                  rx="10"
+                  :rx="isSubProcess(node) ? 4 : 10"
                   :fill="nodeFill(node)"
                   :stroke="nodeStroke(node)"
-                  :stroke-width="selectedId === node.nodeId ? 2.6 : 1.6"
+                  :stroke-width="
+                    selectedId === node.nodeId ? 2.6 : node.type === 'callActivity' ? 3 : 1.6
+                  "
                 />
+                <!-- 折叠标记：子流程 / 调用子流程统一按 BPMN 画法，底部居中的小方框 + 号 -->
+                <g
+                  v-if="hasCollapseMark(node)"
+                  class="trace-subprocess-mark"
+                  :class="{ 'is-drillable': canDrill(node) }"
+                  fill="none"
+                  :stroke="nodeIconColor(node)"
+                  stroke-width="1.1"
+                >
+                  <!-- 命中区：10px 的 + 号太小，用透明矩形把可点击范围放大到 18px。
+                       必须 stop pointerdown，否则会连带触发画布拖动，抬起时不再算点击 -->
+                  <rect
+                    v-if="canDrill(node)"
+                    :x="collapseMarkX(node) - 4"
+                    :y="collapseMarkY(node) - 4"
+                    width="18"
+                    height="18"
+                    fill="transparent"
+                    stroke="none"
+                    pointer-events="all"
+                    @pointerdown.stop
+                    @click.stop="drillDown(node)"
+                  />
+                  <rect
+                    :x="collapseMarkX(node)"
+                    :y="collapseMarkY(node)"
+                    width="10"
+                    height="10"
+                    rx="1"
+                    :fill="nodeFill(node)"
+                  />
+                  <line
+                    :x1="collapseMarkX(node) + 2.4"
+                    :y1="collapseMarkY(node) + 5"
+                    :x2="collapseMarkX(node) + 7.6"
+                    :y2="collapseMarkY(node) + 5"
+                  />
+                  <line
+                    :x1="collapseMarkX(node) + 5"
+                    :y1="collapseMarkY(node) + 2.4"
+                    :x2="collapseMarkX(node) + 5"
+                    :y2="collapseMarkY(node) + 7.6"
+                  />
+                </g>
+                <!-- 多实例标记：BPMN 规范画在活动内部底边居中
+                     并行多实例＝三条竖线，顺序多实例＝三条横线 -->
+                <g
+                  v-if="hasMultiInstanceMark(node)"
+                  class="trace-mi-mark"
+                  :stroke="nodeIconColor(node)"
+                  stroke-width="1.4"
+                  stroke-linecap="butt"
+                >
+                  <line
+                    v-for="(line, i) in multiInstanceMarkLines(node)"
+                    :key="`mi-${i}`"
+                    :x1="line.x1"
+                    :y1="line.y1"
+                    :x2="line.x2"
+                    :y2="line.y2"
+                  />
+                </g>
+                <!-- 任务类型标记：用户=人形、服务=齿轮、脚本=文档、规则=表格、发送/接收=信封 -->
+                <g
+                  v-if="taskMark(node)"
+                  class="trace-task-mark"
+                  :transform="`translate(${node.x + 8}, ${node.y + 7})`"
+                  fill="none"
+                  :stroke="nodeIconColor(node)"
+                  stroke-width="1.3"
+                  stroke-linejoin="round"
+                  stroke-linecap="round"
+                >
+                  <template v-if="taskMark(node) === 'user'">
+                    <circle cx="7" cy="4.1" r="2.5" />
+                    <path d="M2.1 12.6c0-3.5 9.8-3.5 9.8 0" />
+                  </template>
+                  <template v-else-if="taskMark(node) === 'service'">
+                    <circle cx="7" cy="7" r="2.3" />
+                    <path
+                      d="M7 1.3v1.8M7 10.9v1.8M1.3 7h1.8M10.9 7h1.8M3 3l1.3 1.3M9.7 9.7L11 11M11 3L9.7 4.3M4.3 9.7L3 11"
+                    />
+                  </template>
+                  <template v-else-if="taskMark(node) === 'script'">
+                    <path d="M3 1.6h5.2L11 4.4v8H3z" />
+                    <path d="M8.2 1.6v2.8H11" />
+                    <line x1="4.7" y1="6.6" x2="9.3" y2="6.6" />
+                    <line x1="4.7" y1="9" x2="9.3" y2="9" />
+                  </template>
+                  <template v-else-if="taskMark(node) === 'manual'">
+                    <path
+                      d="M4 9.8V4.6a1 1 0 0 1 2 0v4.2M6 8V3.2a1 1 0 0 1 2 0v4.8M8 8.2V4.4a1 1 0 0 1 2 0v3.8M10 8.6V6a1 1 0 0 1 2 0v3.2c0 2.3-1.6 4.2-4 4.2s-4-1.9-4-3.9"
+                    />
+                  </template>
+                  <template v-else-if="taskMark(node) === 'rule'">
+                    <rect x="2.2" y="2.2" width="9.6" height="9.6" rx="1" />
+                    <line x1="2.2" y1="5.4" x2="11.8" y2="5.4" />
+                    <line x1="6.4" y1="5.4" x2="6.4" y2="11.8" />
+                  </template>
+                  <template v-else-if="taskMark(node) === 'send'">
+                    <rect
+                      x="1.8"
+                      y="3.4"
+                      width="10.4"
+                      height="7.2"
+                      rx="1"
+                      :fill="nodeIconColor(node)"
+                    />
+                    <polyline points="1.8,4.2 7,8 12.2,4.2" stroke="#fff" />
+                  </template>
+                  <template v-else-if="taskMark(node) === 'receive'">
+                    <rect x="1.8" y="3.4" width="10.4" height="7.2" rx="1" />
+                    <polyline points="1.8,4.4 7,8.2 12.2,4.4" />
+                  </template>
+                </g>
                 <text
                   :x="cx(node)"
                   :y="node.y + node.height / 2 - 4"
@@ -381,6 +646,48 @@
                   class="trace-comm-badge"
                 >{{ commBadge(node).text }}</text>
               </g>
+
+              <!-- 下钻入口：调用子流程在节点右下角挂一枚蓝色小徽标，点击进入子流程实例跟踪图。
+                   与底部 + 号互为两个入口（+ 号是 BPMN 折叠语义，这枚是明确的「进入」动作）。
+                   pointerdown 必须 stop，否则会先触发画布拖动、抬起时不再算点击 -->
+              <g
+                v-if="canDrill(node)"
+                class="trace-drill-badge"
+                @pointerdown.stop
+                @click.stop="drillDown(node)"
+              >
+                <title>下钻到子流程实例</title>
+                <!-- 命中区：16px 的徽标偏小，扩到 22px，触摸屏也点得中 -->
+                <rect
+                  :x="drillBadgeX(node) - 3"
+                  :y="drillBadgeY(node) - 3"
+                  width="22"
+                  height="22"
+                  fill="transparent"
+                  stroke="none"
+                  pointer-events="all"
+                />
+                <rect
+                  class="trace-drill-badge-face"
+                  :x="drillBadgeX(node)"
+                  :y="drillBadgeY(node)"
+                  width="16"
+                  height="16"
+                  rx="4"
+                  fill="#1677ff"
+                  stroke="#fff"
+                  stroke-width="1.4"
+                />
+                <!-- 箭头：右下方向 + 折角，表示「进入下一层」 -->
+                <path
+                  :d="drillBadgeArrow(node)"
+                  fill="none"
+                  stroke="#fff"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </g>
             </g>
             </svg>
           </div>
@@ -421,6 +728,13 @@
             </div>
             <div v-if="tipNode.comments && tipNode.comments.length" class="trace-tip-comment">
               {{ tipNode.comments[tipNode.comments.length - 1].message }}
+            </div>
+            <div v-if="tipNode.calledInstances && tipNode.calledInstances.length" class="trace-tip-row">
+              <span>调用子流程</span>
+              <b>
+                {{ tipNode.calledInstances.length }} 个
+                <span class="trace-tip-drill">点击右下角 ↘ 或 + 下钻</span>
+              </b>
             </div>
             <div class="trace-tip-foot">点击节点定位执行明细</div>
           </div>
@@ -475,6 +789,11 @@
               <template v-if="column.key === 'name'">
                 <span style="font-weight: 500">{{ record.name }}</span>
                 <div class="muted" style="font-size: 12px">{{ record.typeLabel }}</div>
+                <a
+                  v-if="canDrill(record)"
+                  class="trace-drill-link"
+                  @click.stop="drillDown(record)"
+                >下钻子流程 {{ record.calledInstances.length }} 个</a>
               </template>
               <template v-else-if="column.key === 'status'">
                 <a-tag :color="statusColor(record)">{{ statusText(record) }}</a-tag>
@@ -587,6 +906,42 @@
       </template>
       <div v-else-if="!loading" class="empty-tip">暂无跟踪数据</div>
     </a-spin>
+
+    <!-- 一个调用活动调起多个子流程实例时（循环 / 多实例），先让用户选择实例再下钻 -->
+    <a-modal
+      v-model:open="childPickerOpen"
+      title="选择要下钻的子流程实例"
+      :footer="null"
+      :width="isMobile ? '92%' : 520"
+      :z-index="1200"
+      destroy-on-close
+    >
+      <div class="trace-child-picker">
+        <div class="trace-child-tip">
+          调用活动「{{ childPickerNodeName }}」调起了 {{ childPickerItems.length }} 个子流程实例
+        </div>
+        <div
+          v-for="item in childPickerItems"
+          :key="item.processInstanceId"
+          class="trace-child-item"
+          @click="enterChild(item)"
+        >
+          <div class="trace-child-main">
+            <span class="trace-child-name">
+              {{ item.processTitle || item.processDefinitionName || '子流程' }}
+            </span>
+            <a-tag :color="item.state === 'RUNNING' ? 'processing' : 'green'">
+              {{ item.state === 'RUNNING' ? '进行中' : '已完成' }}
+            </a-tag>
+          </div>
+          <div class="trace-child-meta">
+            <span>实例 {{ shortId(item.processInstanceId) }}</span>
+            <span>开始 {{ fmt(item.startTime) }}</span>
+            <span v-if="item.endTime">结束 {{ fmt(item.endTime) }}</span>
+          </div>
+        </div>
+      </div>
+    </a-modal>
   </a-modal>
 </template>
 
@@ -595,6 +950,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import dayjs from 'dayjs'
 import {
   AimOutlined,
+  ArrowLeftOutlined,
   ExpandAltOutlined,
   CompressOutlined,
   DownloadOutlined,
@@ -628,6 +984,14 @@ const isFullscreen = ref(true)
 const canvasFullscreen = ref(false)
 const loading = ref(false)
 const data = ref(null)
+// 当前正在展示的实例：初始为入口实例，下钻后变为被调用的子流程实例
+const currentPid = ref('')
+// 下钻栈：每层记录上一级实例，用于面包屑与「返回上级」
+const drillTrail = ref([])
+// 一个调用活动调起多个子实例时的选择弹窗
+const childPickerOpen = ref(false)
+const childPickerNodeName = ref('')
+const childPickerItems = ref([])
 // 概览 / 工具栏 / 流程图整体收起：明细多时把上方空间全部让给表格
 const collapsed = ref(false)
 // 导出中：图片栅格化（PNG）需要一点时间，按钮给个 loading 防止重复点击
@@ -1099,6 +1463,11 @@ function buildExportFigure(options = {}) {
 
   const clone = srcSvg.cloneNode(true)
   inlineSvgStyles(srcSvg, clone)
+  // 下钻徽标是交互控件，导出的静态图里点不动，留着只会造成误解。
+  // 节点底部的 ☐+ 仍在，仍能表达「这是可展开的子流程」。
+  // 必须放在 inlineSvgStyles 之后：它按 querySelectorAll 下标对齐源树与克隆树，
+  // 先删节点会让下标整体前移，导致所有元素的样式串位。
+  clone.querySelectorAll('.trace-drill-badge').forEach((el) => el.remove())
   ;['width', 'height', 'viewBox', 'class', 'style'].forEach((attr) => clone.removeAttribute(attr))
 
   // 图形区域按内容包围盒裁剪，BPMN 模型自带的画布留白不该带进导出图
@@ -1420,8 +1789,125 @@ function isEvent(node) {
   return EVENT_TYPES.includes(node.type)
 }
 
+/**
+ * 终止结束事件（terminateEndEvent）在 BPMN 里是「粗圈 + 实心圆」，与其余结束事件靠
+ * 有无内部实心圆区分：普通结束事件为空粗圈，错误/信号/消息/补偿/取消等则在圈内画各自图标。
+ * eventDefinition 由后端从 BPMN 子元素解析，未开始的节点同样取得到。
+ */
+function isTerminateEnd(node) {
+  return node.type === 'endEvent' && node.eventDefinition === 'terminate'
+}
+
+// 中间事件与边界事件按 BPMN 规范是双圈；开始事件单圈、结束事件粗圈
+function isDoubleRing(node) {
+  return (
+    node.type === 'intermediateCatchEvent' ||
+    node.type === 'intermediateThrowEvent' ||
+    node.type === 'boundaryEvent'
+  )
+}
+
+function isNonInterruptingBoundary(node) {
+  return node.type === 'boundaryEvent' && node.interrupting === false
+}
+
 function isGateway(node) {
   return node.type.indexOf('Gateway') >= 0
+}
+
+// 子流程类节点（普通子流程 / 事务子流程 / 即席子流程）在 BPMN 里都带折叠标记
+function isSubProcess(node) {
+  return (
+    node.type === 'subProcess' ||
+    node.type === 'transaction' ||
+    node.type === 'adHocSubProcess'
+  )
+}
+
+// 调用子流程（callActivity）按 BPMN 语义也是「被折叠的流程」，同样画 + 号；
+// 它额外保留粗边框作为调用活动的身份标识，两者不冲突。
+function hasCollapseMark(node) {
+  return isSubProcess(node) || node.type === 'callActivity'
+}
+
+// 折叠标记默认贴底边居中；节点过矮时退回左下角，避免压住第二行文案
+// 判据：第二行文案基线在 h/2+16，标记顶部在 h-10，需 h/2+16 < h-10，即 h > 52（留余量取 66）
+function collapseMarkX(node) {
+  if (node.height < 66) return node.x + 7
+  return cx(node) - 5
+}
+
+function collapseMarkY(node) {
+  // 与 BPMN 规范一致：标记底边与节点底边重合，遮住一小段边框形成「缺口」
+  return node.y + node.height - 10
+}
+
+/**
+ * 多实例标记：BPMN 规范画在活动内部底边居中，并行多实例为三条竖线，顺序多实例为三条横线。
+ *
+ * <p>是否多实例只能从 BPMN 的 multiInstanceLoopCharacteristics 判断：元素名仍是
+ * userTask / subProcess，而历史表里多实例体记作 {@code xxx#multiInstanceBody}、
+ * 各实例记的仍原 activityId，两者都看不出多实例。未开始的多实例节点同样有标记。</p>
+ */
+function hasMultiInstanceMark(node) {
+  return node.multiInstance === 'parallel' || node.multiInstance === 'sequential'
+}
+
+// 与折叠标记（同样贴底边居中）并存时右移，避免两条标记叠在一起
+function multiInstanceCenterX(node) {
+  return hasCollapseMark(node) ? cx(node) + 16 : cx(node)
+}
+
+// 三条线的坐标：竖线＝并行，横线＝顺序。节点过矮时整体缩一档，防止压住第二行文案
+function multiInstanceMarkLines(node) {
+  const size = node.height < 70 ? 8 : 10
+  const gap = 3
+  const centerX = multiInstanceCenterX(node)
+  const bottom = node.y + node.height - 1
+  const lines = []
+  if (node.multiInstance === 'sequential') {
+    const top = bottom - (gap * 2)
+    for (let i = 0; i < 3; i++) {
+      const y = top + i * gap
+      lines.push({ x1: centerX - size / 2, y1: y, x2: centerX + size / 2, y2: y })
+    }
+  } else {
+    const top = bottom - size
+    const left = centerX - gap
+    for (let i = 0; i < 3; i++) {
+      const x = left + i * gap
+      lines.push({ x1: x, y1: top, x2: x, y2: bottom })
+    }
+  }
+  return lines
+}
+
+/**
+ * 任务类型标记：与 BPMN 规范一致，用户任务=人形、服务任务=齿轮、脚本任务=文档、
+ * 人工任务=手形、规则任务=表格、发送/接收任务=信封。
+ *
+ * <p>跟踪图此前把所有任务都画成同一个圆角矩形，用户任务和自动执行的服务任务
+ * 在图上完全一样，只能靠悬停看文字。类型只能从 BPMN 元素名判断，
+ * 不能用 ACT_HI_ACTINST 的 ACT_TYPE_（未执行的节点没有历史记录）。</p>
+ */
+function taskMark(node) {
+  const type = node.type
+  if (type === 'userTask') return 'user'
+  if (type === 'serviceTask') return 'service'
+  if (type === 'scriptTask') return 'script'
+  if (type === 'manualTask') return 'manual'
+  if (type === 'businessRuleTask') return 'rule'
+  if (type === 'sendTask') return 'send'
+  if (type === 'receiveTask') return 'receive'
+  return null
+}
+
+// 图标比描边更细，未开始时用 #bfbfbf，避免在浅灰背景上几乎看不见
+function nodeIconColor(node) {
+  if (node.commLocked) return '#fa8c16'
+  if (node.status === 'COMPLETED') return '#52c41a'
+  if (node.status === 'ACTIVE') return '#1677ff'
+  return '#bfbfbf'
 }
 
 function cx(node) {
@@ -2025,11 +2511,108 @@ function hideTip() {
   tipNode.value = null
 }
 
-async function load() {
-  if (!props.processInstanceId) return
+// ===== 调用子流程下钻 =====
+
+// 只有真正被调用过、且引擎记录了子实例 ID 的调用活动才可下钻。
+// 未执行 / 无历史记录的调用活动仍然保留 + 号（BPMN 语义），但点击只提示原因。
+function canDrill(node) {
+  return !!node
+    && node.type === 'callActivity'
+    && Array.isArray(node.calledInstances)
+    && node.calledInstances.length > 0
+}
+
+// 下钻徽标挂在节点右下角外侧，尺寸固定 16px。
+// 靠近画布右/下边界时向画布内收（而不是翻到节点内部），否则会被 viewBox 裁掉半块。
+const DRILL_BADGE_SIZE = 16
+
+function clampBadge(outer, total) {
+  const limit = Number.isFinite(total) && total > 0 ? total - DRILL_BADGE_SIZE - 2 : null
+  return limit != null && outer > limit ? limit : outer
+}
+
+function drillBadgeX(node) {
+  return clampBadge(node.x + node.width + 3, data.value ? data.value.diagramWidth : null)
+}
+
+function drillBadgeY(node) {
+  return clampBadge(node.y + node.height + 3, data.value ? data.value.diagramHeight : null)
+}
+
+// 白色箭头：一条 45° 斜线 + 右下折角，表示「进入下一层」
+function drillBadgeArrow(node) {
+  const x = drillBadgeX(node)
+  const y = drillBadgeY(node)
+  return `M${x + 5} ${y + 5}L${x + 11} ${y + 11}M${x + 11} ${y + 7}L${x + 11} ${y + 11}L${x + 7} ${y + 11}`
+}
+
+function drillDown(node) {
+  if (!canDrill(node)) {
+    message.info(
+      node && node.status === 'PENDING'
+        ? '该调用活动尚未执行，暂无可下钻的子流程实例'
+        : '该调用活动没有可下钻的子流程实例'
+    )
+    return
+  }
+  const items = node.calledInstances
+  // 常见情况是只调起一次，直接进入；循环 / 多实例会调起多个，先让用户选择
+  if (items.length === 1) {
+    enterChild(items[0], node.name)
+    return
+  }
+  childPickerNodeName.value = node.name
+  childPickerItems.value = items
+  childPickerOpen.value = true
+}
+
+// 进入子流程实例：把当前实例压入下钻栈，再按子实例 ID 加载新的跟踪图
+function enterChild(item, nodeName) {
+  if (!item || !item.processInstanceId) return
+  childPickerOpen.value = false
+  drillTrail.value = [
+    ...drillTrail.value,
+    {
+      processInstanceId: currentPid.value,
+      name: data.value?.processTitle || nodeName || '上级流程'
+    }
+  ]
+  currentPid.value = item.processInstanceId
+  hideTip()
+  load()
+}
+
+// 返回上一级：弹出栈顶实例重新加载
+function drillUp() {
+  if (!drillTrail.value.length) return
+  const previous = drillTrail.value[drillTrail.value.length - 1]
+  drillTrail.value = drillTrail.value.slice(0, -1)
+  currentPid.value = previous.processInstanceId
+  hideTip()
+  load()
+}
+
+// 面包屑跳转：直接回到第 index 层（该层及其之后的下钻记录一并出栈）
+function drillTo(index) {
+  const target = drillTrail.value[index]
+  if (!target) return
+  drillTrail.value = drillTrail.value.slice(0, index)
+  currentPid.value = target.processInstanceId
+  hideTip()
+  load()
+}
+
+function shortId(id) {
+  if (!id) return '—'
+  return id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id
+}
+
+async function load(pid = currentPid.value || props.processInstanceId) {
+  if (!pid) return
   loading.value = true
   try {
-    data.value = await wbApi.trace(props.processInstanceId)
+    data.value = await wbApi.trace(pid)
+    currentPid.value = pid
     selectedId.value = ''
     expandedKeys.value = []
     openTexts.value = {}
@@ -2068,6 +2651,11 @@ watch(
       isFullscreen.value = true
       // 默认展开概览与流程图
       collapsed.value = false
+      // 重新打开时清空下钻状态，始终从入口实例开始
+      drillTrail.value = []
+      childPickerOpen.value = false
+      childPickerItems.value = []
+      currentPid.value = props.processInstanceId
       load()
     } else {
       hideTip()
@@ -2144,6 +2732,135 @@ onBeforeUnmount(() => {
 .trace-window-btn:hover {
   color: #1677ff;
   background: rgba(0, 0, 0, 0.04);
+}
+/* 调用子流程下钻：+ 号可点击时给出手型与悬停反馈 */
+.trace-subprocess-mark.is-drillable {
+  cursor: pointer;
+}
+.trace-subprocess-mark.is-drillable:hover {
+  filter: drop-shadow(0 0 2px rgba(22, 119, 255, 0.6));
+}
+/* 右下角下钻徽标：常态蓝色，悬停加深，给出可点暗示。
+   只作用于可视 rect，不能写 .trace-drill-badge:hover rect——那会把上面的透明命中区一起染色 */
+.trace-drill-badge {
+  cursor: pointer;
+}
+.trace-drill-badge-face {
+  transition: fill 0.15s ease;
+}
+.trace-drill-badge:hover .trace-drill-badge-face {
+  fill: #0958d9;
+}
+.trace-drill-badge:hover {
+  filter: drop-shadow(0 1px 3px rgba(22, 119, 255, 0.45));
+}
+.trace-tip-drill {
+  margin-left: 6px;
+  font-size: 11px;
+  color: #1677ff;
+}
+.trace-drill-link {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: #1677ff;
+  cursor: pointer;
+}
+.trace-drill-link:hover {
+  text-decoration: underline;
+}
+/* 子流程下钻面包屑：不随概览收起，任何高度下都能看到层级与返回入口 */
+.trace-drill-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  margin-bottom: 10px;
+  border: 1px solid #d6e8ff;
+  border-radius: 8px;
+  background: #f2f8ff;
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+.trace-drill-back {
+  padding: 0 4px;
+  height: 24px;
+  font-size: 12px;
+}
+.trace-drill-path {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  min-width: 0;
+  color: rgba(0, 0, 0, 0.45);
+}
+.trace-drill-crumb {
+  color: #1677ff;
+  cursor: pointer;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trace-drill-crumb:hover {
+  text-decoration: underline;
+}
+.trace-drill-sep {
+  color: rgba(0, 0, 0, 0.25);
+}
+.trace-drill-current {
+  color: rgba(0, 0, 0, 0.85);
+  font-weight: 500;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trace-drill-tip {
+  margin-left: auto;
+  color: rgba(0, 0, 0, 0.35);
+}
+/* 子实例选择弹窗 */
+.trace-child-tip {
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+.trace-child-item {
+  padding: 10px 12px;
+  border: 1px solid #eef0f3;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.trace-child-item + .trace-child-item {
+  margin-top: 8px;
+}
+.trace-child-item:hover {
+  border-color: #91caff;
+  background: #f2f8ff;
+}
+.trace-child-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.trace-child-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trace-child-meta {
+  margin-top: 4px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
 }
 .trace-overview {
   display: flex;

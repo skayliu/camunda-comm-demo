@@ -1,20 +1,27 @@
 package com.example.camundademo.controller;
 
 import com.example.camundademo.security.CurrentUser;
+import com.example.camundademo.service.BusinessException;
 import com.example.camundademo.service.ProcessTraceService;
+import com.example.camundademo.service.TaskTransferService;
 import com.example.camundademo.service.WorkbenchService;
 import org.camunda.bpm.engine.TaskService;
 import org.camunda.bpm.engine.task.Task;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -34,6 +41,9 @@ public class WorkbenchController {
 
     @Autowired
     private ProcessTraceService processTraceService;
+
+    @Autowired
+    private TaskTransferService taskTransferService;
 
     /** 当前登录用户信息（前端登录后填充头像区/权限区） */
     @GetMapping("/me")
@@ -88,6 +98,73 @@ public class WorkbenchController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "不能查看他人的待办");
         }
         return workbenchService.taskDetail(taskId, user);
+    }
+
+    /**
+     * 转办：把待办交给另一个人办理。
+     *
+     * <p>操作人一律取认证上下文；请求体只有 {@code targetUserId} 与 {@code reason}，
+     * 避免客户端通过传 fromUser 之类的字段伪造转办来源。</p>
+     */
+    @PostMapping("/task/{taskId}/transfer")
+    public Map<String, Object> transfer(@PathVariable String taskId,
+                                        @RequestBody(required = false) Map<String, Object> req,
+                                        Authentication authentication) {
+        String user = CurrentUser.require(authentication);
+        Object target = req == null ? null : req.get("targetUserId");
+        Object reason = req == null ? null : req.get("reason");
+        return taskTransferService.transfer(taskId, user,
+                target == null ? null : String.valueOf(target),
+                reason == null ? null : String.valueOf(reason));
+    }
+
+    /**
+     * 单条待办的转办链。
+     *
+     * <p>可见范围除当前办理人外，还包括转办链上的人员——转出方需要能查到“我把这活交给谁了”，
+     * 否则转办一提交，这条待办就从他的所有列表里消失。</p>
+     */
+    @GetMapping("/task/{taskId}/transfers")
+    public List<Map<String, Object>> transfers(@PathVariable String taskId,
+                                               Authentication authentication) {
+        String user = CurrentUser.require(authentication);
+        List<Map<String, Object>> chain = taskTransferService.listByTaskId(taskId);
+        boolean participant = chain.stream().anyMatch(t ->
+                user.equals(t.get("from")) || user.equals(t.get("to")));
+        if (!participant) {
+            Task task = taskService.createTaskQuery().taskId(taskId).singleResult();
+            if (task == null || !user.equals(task.getAssignee())) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权查看该待办的转办记录");
+            }
+        }
+        return chain;
+    }
+
+    /**
+     * 某个流程实例的全部转办记录（「我的发起」「我的已办」详情共用）。
+     *
+     * <p>可见范围与流程跟踪保持一致：发起人、办理过该实例任务的人、转办链上的人。</p>
+     */
+    @GetMapping("/process/{processInstanceId}/transfers")
+    public List<Map<String, Object>> processTransfers(@PathVariable String processInstanceId,
+                                                      Authentication authentication) {
+        String user = CurrentUser.require(authentication);
+        if (!processTraceService.canView(processInstanceId, user)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权查看该流程的转办记录");
+        }
+        return taskTransferService.listByProcessInstanceId(processInstanceId);
+    }
+
+    /**
+     * 业务异常统一返回 200 + {error:true, message}，与沟通接口口径一致。
+     * 不加这个处理器，BusinessException 会落到 500，前端只能提示“服务端处理失败”。
+     */
+    @ExceptionHandler(BusinessException.class)
+    public Map<String, Object> handleBusiness(BusinessException e) {
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put("error", true);
+        r.put("message", e.getMessage());
+        return r;
     }
 
     /**

@@ -92,6 +92,18 @@ export const wbApi = {
   taskDetail(taskId) {
     return http.get(`/wb/task/${taskId}`)
   },
+  /** 转办待办：把任务交给另一个人办理 */
+  transfer(taskId, payload) {
+    return http.post(`/wb/task/${taskId}/transfer`, payload)
+  },
+  /** 单条待办的转办链 */
+  transfers(taskId) {
+    return http.get(`/wb/task/${taskId}/transfers`)
+  },
+  /** 某个流程实例的全部转办记录（我的发起 / 已办详情共用） */
+  processTransfers(processInstanceId) {
+    return http.get(`/wb/process/${processInstanceId}/transfers`)
+  },
   /** 流程跟踪：BPMN 节点几何 + 节点执行状态与明细 */
   trace(processInstanceId) {
     return http.get(`/wb/trace/${processInstanceId}`)

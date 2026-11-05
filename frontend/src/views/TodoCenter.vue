@@ -96,6 +96,9 @@
             <div v-if="record.isCommTask && record.sourceTaskDefKey" class="muted" style="font-size: 12px">
               来自 {{ record.sourceTaskDefKey }} 节点
             </div>
+            <div v-else-if="record.transferCount" class="muted" style="font-size: 12px">
+              由 {{ record.lastTransfer.from }} 转办
+            </div>
           </template>
 
           <template v-else-if="column.key === 'applicant'">
@@ -124,6 +127,14 @@
               <a-button type="link" size="small" @click="openTask(record)">
                 {{ record.isCommTask ? '去反馈' : '去处理' }}
               </a-button>
+              <a-button
+                v-if="!record.isCommTask"
+                type="link"
+                size="small"
+                @click="openTransfer(record)"
+              >
+                转办
+              </a-button>
               <a-button type="link" size="small" @click="openTrace(record)">跟踪</a-button>
             </a-space>
           </template>
@@ -144,6 +155,13 @@
     />
 
     <ProcessTraceModal v-model:open="traceOpen" :process-instance-id="tracePid" />
+
+    <TransferModal
+      v-model:open="transferOpen"
+      :task-id="transferTask.taskId"
+      :task-name="transferTask.taskName"
+      @done="load"
+    />
   </div>
 </template>
 
@@ -164,6 +182,7 @@ import {
 import { commApi, errorText, wbApi } from '../api'
 import TaskDrawer from '../components/TaskDrawer.vue'
 import ProcessTraceModal from '../components/ProcessTraceModal.vue'
+import TransferModal from '../components/TransferModal.vue'
 
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
@@ -186,6 +205,9 @@ const currentTaskId = ref('')
 const traceOpen = ref(false)
 const tracePid = ref('')
 
+const transferOpen = ref(false)
+const transferTask = reactive({ taskId: '', taskName: '' })
+
 const typeOptions = [
   { label: '全部', value: 'all' },
   { label: '审批待办', value: 'approval' },
@@ -199,7 +221,7 @@ const columns = [
   { title: '发起人', key: 'applicant', width: 130 },
   { title: '到达时间', key: 'createTime', width: 150 },
   { title: '状态', key: 'status', width: 100 },
-  { title: '操作', key: 'action', width: 150, fixed: 'right' }
+  { title: '操作', key: 'action', width: 190, fixed: 'right' }
 ]
 
 const pagination = computed(() => ({
@@ -263,6 +285,12 @@ function openTask(record) {
 function openTrace(record) {
   tracePid.value = record.processInstanceId
   traceOpen.value = true
+}
+
+function openTransfer(record) {
+  transferTask.taskId = record.taskId
+  transferTask.taskName = record.taskName
+  transferOpen.value = true
 }
 
 async function createProcess() {

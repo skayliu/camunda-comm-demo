@@ -439,6 +439,78 @@ body {
   color: var(--text-sub);
 }
 
+/* 转办链：竖向节点 + 左侧连线，最后一条的接收人是当前办理人 */
+.transfer-chain {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px 4px;
+  background: #fcfcfd;
+}
+
+.transfer-item {
+  position: relative;
+  padding: 0 0 12px 18px;
+}
+
+.transfer-item::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.12);
+}
+
+.transfer-item:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 15px;
+  bottom: 2px;
+  width: 1px;
+  background: var(--border);
+}
+
+.transfer-item-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.transfer-user {
+  word-break: break-all;
+}
+
+.transfer-arrow {
+  color: var(--text-sub);
+}
+
+.transfer-meta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.transfer-reason {
+  margin-top: 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-main);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .drawer-footer {
   display: flex;
   align-items: center;

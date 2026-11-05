@@ -1,6 +1,7 @@
 package com.example.camundademo.service;
 
 import com.example.camundademo.entity.BizCommTask;
+import com.example.camundademo.entity.BizTaskExt;
 import org.camunda.bpm.engine.HistoryService;
 import org.camunda.bpm.engine.IdentityService;
 import org.camunda.bpm.engine.RepositoryService;
@@ -59,6 +60,9 @@ public class WorkbenchService {
 
     @Autowired
     private CommunicationService communicationService;
+
+    @Autowired
+    private TaskTransferService taskTransferService;
 
     // ===== 当前用户 =====
 
@@ -136,6 +140,18 @@ public class WorkbenchService {
             }
             filtered.add(vo);
         }
+        // 转办信息整页一次批量取，避免每行单独查库；同时把“这条待办是转来的”标在列表上，
+        // 否则新办理人只知道有活干，不知道是谁转给他的。
+        Map<String, List<Map<String, Object>>> transfers = taskTransferService.groupByTaskIds(
+                filtered.stream().map(vo -> String.valueOf(vo.get("taskId"))).toList());
+        for (Map<String, Object> vo : filtered) {
+            List<Map<String, Object>> chain = transfers.get(String.valueOf(vo.get("taskId")));
+            if (chain == null || chain.isEmpty()) {
+                continue;
+            }
+            vo.put("transferCount", chain.size());
+            vo.put("lastTransfer", chain.get(chain.size() - 1));
+        }
         Map<String, Object> result = pageResult(filtered, page, size);
         Map<String, Object> stats = new LinkedHashMap<>();
         stats.put("total", tasks.size());
@@ -156,12 +172,21 @@ public class WorkbenchService {
         boolean isComm = BizCommTask.isCommTaskKey(task.getTaskDefinitionKey());
         Map<String, Object> vo = toTodoVO(task, isComm);
         vo.put("variables", safeVariables(task.getProcessInstanceId()));
-        vo.put("commStatus", communicationService.getTaskCommStatus(
-                isComm ? resolveRootTaskId(task) : taskId, userId));
+        Map<String, Object> commStatus = communicationService.getTaskCommStatus(
+                isComm ? resolveRootTaskId(task) : taskId, userId);
+        vo.put("commStatus", commStatus);
         if (isComm) {
             vo.put("commStatusOfSelf", communicationService.getTaskCommStatus(taskId, userId));
         }
         vo.put("comments", commentsOf(taskId));
+        // 转办链与可转办标记：沟通中/沟通待办不可转办，后端与前端共用同一口径
+        vo.put("transfers", taskTransferService.listByTaskId(taskId));
+        // 必须再带上「当前是否为办理人」：未签收的候选任务 assignee 为空，
+        // 任务详情对任何登录用户开放，只判沟通状态会给出一个点了必然失败的转办按钮。
+        boolean currentAssignee = task.getAssignee() != null && task.getAssignee().equals(userId);
+        vo.put("canTransfer", !isComm
+                && currentAssignee
+                && !BizTaskExt.STATUS_COMMUNICATING.equals(commStatus.get("bizStatus")));
 
         // 沟通待办：把同一会话内其他对象的反馈进度一并返回，前端可直接还原上下文
         if (isComm) {

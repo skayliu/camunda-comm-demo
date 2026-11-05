@@ -1,10 +1,9 @@
 <template>
-  <a-drawer
+  <DetailDrawer
     :open="open"
-    :width="isMobile ? '100%' : 680"
-    :body-style="{ paddingBottom: '16px' }"
-    destroy-on-close
-    @close="close"
+    :width="680"
+    :loading="loading"
+    @update:open="(val) => { if (!val) close() }"
   >
     <template #title>
       <div style="display: flex; align-items: center; gap: 8px">
@@ -13,34 +12,39 @@
           {{ task.isFollowUp ? '沟通追问' : '沟通待办' }}
         </a-tag>
         <a-tag v-else color="blue">审批待办</a-tag>
+        <a-tag v-if="transfers.length" color="cyan">已转办 {{ transfers.length }} 次</a-tag>
       </div>
     </template>
 
-    <a-spin :spinning="loading">
-      <template v-if="loaded">
-        <!-- 基本信息 -->
-        <div class="drawer-section">
-          <a-descriptions :column="2" size="small" bordered>
-            <a-descriptions-item label="流程" :span="2">
-              {{ task.processTitle || task.processDefinitionName || '审批流程' }}
-            </a-descriptions-item>
-            <a-descriptions-item label="当前节点">
-              {{ task.taskName }}
-              <span v-if="task.sourceTaskDefKey" class="muted">
-                （来源 {{ task.sourceTaskDefKey }}）
-              </span>
-            </a-descriptions-item>
-            <a-descriptions-item label="发起人">
-              {{ task.applicant || '-' }}
-            </a-descriptions-item>
-            <a-descriptions-item label="到达时间">
-              {{ fmt(task.createTime) }}
-            </a-descriptions-item>
-            <a-descriptions-item label="流程实例">
-              <span class="mono">{{ shortId(task.processInstanceId) }}</span>
-            </a-descriptions-item>
-          </a-descriptions>
-        </div>
+    <template v-if="loaded">
+      <!-- 基本信息 -->
+      <div class="drawer-section">
+        <a-descriptions :column="2" size="small" bordered>
+          <a-descriptions-item label="流程" :span="2">
+            {{ task.processTitle || task.processDefinitionName || '审批流程' }}
+          </a-descriptions-item>
+          <a-descriptions-item label="当前节点">
+            {{ task.taskName }}
+            <span v-if="task.sourceTaskDefKey" class="muted">
+              （来源 {{ task.sourceTaskDefKey }}）
+            </span>
+          </a-descriptions-item>
+          <a-descriptions-item label="发起人">
+            {{ task.applicant || '-' }}
+          </a-descriptions-item>
+          <a-descriptions-item label="到达时间">
+            {{ fmt(task.createTime) }}
+          </a-descriptions-item>
+          <a-descriptions-item label="流程实例">
+            <span class="mono">{{ shortId(task.processInstanceId) }}</span>
+          </a-descriptions-item>
+        </a-descriptions>
+      </div>
+
+      <!-- 转办记录：这条待办一路被谁交给谁，最后一条的接收人即当前办理人 -->
+      <DetailSection v-if="transfers.length" title="转办记录" :extra="`共 ${transfers.length} 次`">
+        <TransferChain :transfers="transfers" :current-assignee="task.assignee" />
+      </DetailSection>
 
         <!-- 沟通待办：我的反馈 -->
         <template v-if="task.isCommTask">
@@ -267,11 +271,9 @@
           </div>
         </template>
       </template>
-    </a-spin>
 
     <template #footer>
-      <div class="drawer-footer">
-        <a-button @click="close">关闭</a-button>
+      <a-button @click="close">关闭</a-button>
 
         <template v-if="task.isCommTask">
           <a-button
@@ -294,6 +296,8 @@
         </template>
 
         <template v-else>
+          <!-- 转办条件由后端 canTransfer 统一计算：当前办理人本人、非沟通待办、不在沟通中 -->
+          <a-button v-if="task.canTransfer" @click="openTransfer">转办</a-button>
           <a-button
             :disabled="!canInitiate"
             :title="canInitiate ? '' : '仅当前待办处理人可发起沟通'"
@@ -323,10 +327,10 @@
             </a-button>
           </a-tooltip>
         </template>
-      </div>
     </template>
 
     <!-- 发起 / 追问 沟通 -->
+    <template #extra>
     <a-modal
       v-model:open="commModal.open"
       :title="commModal.title"
@@ -373,7 +377,15 @@
         </a-form-item>
       </a-form>
     </a-modal>
-  </a-drawer>
+
+    <TransferModal
+      v-model:open="transferOpen"
+      :task-id="taskId"
+      :task-name="task.taskName"
+      @done="onTransferDone"
+    />
+    </template>
+  </DetailDrawer>
 </template>
 
 <script setup>
@@ -381,6 +393,10 @@ import { computed, reactive, ref, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import { commApi, errorText, wbApi } from '../api'
+import TransferModal from './TransferModal.vue'
+import DetailDrawer from './DetailDrawer.vue'
+import DetailSection from './DetailSection.vue'
+import TransferChain from './TransferChain.vue'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -394,7 +410,23 @@ const submitting = ref(false)
 const task = ref({})
 const approveComment = ref('')
 const replyContent = ref('')
-const isMobile = ref(window.innerWidth <= 768)
+
+// 转办记录：后端按时间升序返回，最后一条的接收人就是当前办理人。
+// 这里不做二次排序，避免与落库顺序不一致。
+const transferOpen = ref(false)
+const transfers = computed(() => (Array.isArray(task.value.transfers) ? task.value.transfers : []))
+
+function openTransfer() {
+  transferOpen.value = true
+}
+
+// 转办成功后本条待办已经不归自己：taskDetail 会按 assignee 返回 403，
+// 所以不能再 load()，直接关闭抽屉并刷新列表。
+function onTransferDone() {
+  transferOpen.value = false
+  close()
+  emit('refresh')
+}
 
 const comm = ref({})
 // 沟通待办自身状态：taskDetail 里 commStatus 指向“源待办”，
