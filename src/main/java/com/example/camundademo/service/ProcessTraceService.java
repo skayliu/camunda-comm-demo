@@ -25,6 +25,7 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -53,8 +54,28 @@ public class ProcessTraceService {
             "startEvent", "endEvent", "intermediateCatchEvent", "intermediateThrowEvent",
             "boundaryEvent", "userTask", "serviceTask", "scriptTask", "manualTask",
             "businessRuleTask", "sendTask", "receiveTask", "task", "callActivity",
-            "subProcess", "exclusiveGateway", "parallelGateway", "inclusiveGateway",
+            "subProcess", "transaction", "adHocSubProcess",
+            "exclusiveGateway", "parallelGateway", "inclusiveGateway",
             "eventBasedGateway");
+
+    /**
+     * 兜底判定：Camunda 在 ACT_TYPE_ 里写的是具体事件类型（noneEndEvent、timerStartEvent…），
+     * 不是 BPMN 元素名（endEvent、startEvent）。所以除通用名外还要按后缀匹配，
+     * 否则普通结束事件永远匹配不上。
+     *
+     * <p>正常路径以 BPMN 图形的 shape id 为准，本方法只在取不到 BPMN XML 时兜底。</p>
+     */
+    private static boolean isRenderableType(String type) {
+        if (type == null) {
+            return false;
+        }
+        if (RENDERABLE_TYPES.contains(type)) {
+            return true;
+        }
+        return type.endsWith("EndEvent") || type.endsWith("StartEvent")
+                || type.startsWith("boundary")
+                || type.endsWith("Catch") || type.endsWith("Throw");
+    }
 
     private static final Map<String, String> TYPE_LABELS = Map.ofEntries(
             Map.entry("startEvent", "开始事件"),
@@ -72,10 +93,43 @@ public class ProcessTraceService {
             Map.entry("task", "任务"),
             Map.entry("callActivity", "调用活动"),
             Map.entry("subProcess", "子流程"),
+            Map.entry("transaction", "事务子流程"),
+            Map.entry("adHocSubProcess", "即席子流程"),
             Map.entry("exclusiveGateway", "排他网关"),
             Map.entry("parallelGateway", "并行网关"),
             Map.entry("inclusiveGateway", "包容网关"),
             Map.entry("eventBasedGateway", "事件网关"));
+
+    /**
+     * 事件定义类型 → 中文前缀。BPMN 里「定时开始事件」的元素名仍是 startEvent，
+     * 真正的类型信息在子元素 {@code <timerEventDefinition/>} 上，必须单独解析，
+     * 否则跟踪图只能画出通用空圈，看不出这是定时、消息还是信号触发。
+     */
+    private static final Map<String, String> EVENT_DEF_LABELS = Map.ofEntries(
+            Map.entry("timer", "定时"),
+            Map.entry("message", "消息"),
+            Map.entry("signal", "信号"),
+            Map.entry("conditional", "条件"),
+            Map.entry("error", "错误"),
+            Map.entry("escalation", "升级"),
+            Map.entry("terminate", "终止"),
+            Map.entry("compensate", "补偿"),
+            Map.entry("link", "链接"),
+            Map.entry("cancel", "取消"),
+            Map.entry("multiple", "多重"),
+            Map.entry("parallelMultiple", "并行多重"));
+
+    /**
+     * 多实例类型 → 中文前缀。是否为多实例只能看 {@code <multiInstanceLoopCharacteristics/>}：
+     * 元素名仍是 userTask / subProcess，{@code isSequential="true"} 为顺序多实例，
+     * 缺省为并行多实例。历史表里多实例体是 {@code userTask1#multiInstanceBody}，
+     * 而各实例仍是原 activityId，同样无法用于判定。
+     */
+    private static final Map<String, String> MULTI_INSTANCE_LABELS = Map.of(
+            "parallel", "并行多实例",
+            "sequential", "顺序多实例");
+
+    private static final String EVENT_DEF_SUFFIX = "EventDefinition";
 
     public static final String STATUS_COMPLETED = "COMPLETED";
     public static final String STATUS_ACTIVE = "ACTIVE";
@@ -96,13 +150,26 @@ public class ProcessTraceService {
     @Autowired
     private CommunicationService communicationService;
 
+    @Autowired
+    private TaskTransferService taskTransferService;
+
+    /** 子流程调用链的最大回溯深度，防止异常数据形成环导致无限递归 */
+    private static final int MAX_CALL_DEPTH = 8;
+
     /**
      * 当前用户能否查看该流程实例的跟踪图。
      *
      * <p>可见范围：流程发起人 + 在该实例上办理过任务的人（含沟通任务的反馈人），
      * 以及当前待办的处理人。这样“我的待办 / 已办 / 我的发起”列表里的记录都能打开跟踪。</p>
+     *
+     * <p>被调用子流程还要沿调用链向上找：子流程实例的发起人可能为空或不是当前用户，
+     * 但对父流程有权限的人必须能下钻查看它，否则点击调用活动上的 + 会直接 403。</p>
      */
     public boolean canView(String processInstanceId, String userId) {
+        return canView(processInstanceId, userId, 0);
+    }
+
+    private boolean canView(String processInstanceId, String userId, int depth) {
         if (processInstanceId == null || userId == null) {
             return false;
         }
@@ -121,10 +188,49 @@ public class ProcessTraceService {
         if (handled > 0) {
             return true;
         }
-        return taskService.createTaskQuery()
+        // 转办会把历史任务的办理人改写成接收人，转出方在上面两个查询里都查不到自己。
+        // 不补这一条，他把待办转出去之后就再也打不开这张跟踪图。
+        if (taskTransferService.participatedInTransfer(processInstanceId, userId)) {
+            return true;
+        }
+        if (taskService.createTaskQuery()
                 .processInstanceId(processInstanceId)
                 .taskAssignee(userId)
-                .count() > 0;
+                .count() > 0) {
+            return true;
+        }
+        if (depth >= MAX_CALL_DEPTH) {
+            return false;
+        }
+        // 该实例若由 callActivity 调起，则继承父实例的可见权限
+        for (String parentId : parentProcessInstanceIds(processInstanceId)) {
+            if (canView(parentId, userId, depth + 1)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 找出直接调起该实例的父流程实例。
+     *
+     * <p>直接读子实例的 {@code getSuperProcessInstanceId()}：引擎在 callActivity 调起子流程时
+     * 写入该字段。注意 {@code HistoricProcessInstanceQuery.superProcessInstanceId(x)} 的语义是
+     * “父实例为 x 的子实例”，方向相反，不能拿来反查父级。</p>
+     */
+    private List<String> parentProcessInstanceIds(String processInstanceId) {
+        if (processInstanceId == null) {
+            return Collections.emptyList();
+        }
+        try {
+            HistoricProcessInstance child = historyService.createHistoricProcessInstanceQuery()
+                    .processInstanceId(processInstanceId).singleResult();
+            String parentId = child == null ? null : child.getSuperProcessInstanceId();
+            return parentId == null ? Collections.emptyList() : List.of(parentId);
+        } catch (RuntimeException ignore) {
+            // 历史表结构异常时不阻断跟踪图，仅退化为无父级权限继承
+            return Collections.emptyList();
+        }
     }
 
     /** 组装流程图跟踪数据 */
@@ -141,10 +247,33 @@ public class ProcessTraceService {
                 .orderByHistoricActivityInstanceStartTime().asc()
                 .list();
 
+        // 图上的节点集合，是「一条历史活动该不该算到某个节点上」的唯一判据。
+        // 不能用 ACT_TYPE_ 白名单来判：Camunda 在 ACT_HI_ACTINST 里记录的是具体事件类型，
+        // 例如普通结束事件是 noneEndEvent、终止结束事件是 terminateEndEvent，
+        // 而 BPMN 元素名统一是 endEvent。按元素名过滤会把已结束流程的结束节点整条丢掉，
+        // 节点因为拿不到实例被判成“未开始”，流程图与明细就会同时显示流程还没走完。
+        Diagram diagram = parseDiagram(hpi.getProcessDefinitionId());
+        Set<String> shapeIds = new HashSet<>();
+        for (NodeShape shape : diagram.shapes) {
+            if (shape.id != null) {
+                shapeIds.add(shape.id);
+            }
+        }
+
         // 流程节点的执行实例，按节点 key 聚合
         Map<String, List<HistoricActivityInstance>> byNode = new LinkedHashMap<>();
         for (HistoricActivityInstance a : activities) {
-            if (a.getActivityId() == null || !RENDERABLE_TYPES.contains(a.getActivityType())) {
+            if (a.getActivityId() == null) {
+                continue;
+            }
+            if (!shapeIds.isEmpty()) {
+                // 只保留图上真实存在的节点；multiInstanceBody 之类派生执行的 activityId
+                // 形如 "userTask1#multiInstanceBody"，不在 shapeIds 中，会被自然排除。
+                if (!shapeIds.contains(a.getActivityId())) {
+                    continue;
+                }
+            } else if (!isRenderableType(a.getActivityType())) {
+                // BPMN XML 取不到时退回按类型兜底，避免整张图全部灰掉
                 continue;
             }
             byNode.computeIfAbsent(a.getActivityId(), k -> new ArrayList<>()).add(a);
@@ -240,8 +369,6 @@ public class ProcessTraceService {
                     .add(toWithdrawnCommVO(record, initiator, sourceKey));
         }
 
-        Diagram diagram = parseDiagram(hpi.getProcessDefinitionId());
-
         List<Map<String, Object>> nodes = new ArrayList<>();
         List<String> activeNodeIds = new ArrayList<>();
         List<String> completedNodeIds = new ArrayList<>();
@@ -259,7 +386,13 @@ public class ProcessTraceService {
             node.put("nodeId", shape.id);
             node.put("name", resolveName(shape.name, instances, shape.id));
             node.put("type", shape.type);
-            node.put("typeLabel", TYPE_LABELS.getOrDefault(shape.type, shape.type));
+            node.put("typeLabel", typeLabel(shape));
+            // 事件定义（timer / message / signal …），前端据此绘制 BPMN 标准图标
+            node.put("eventDefinition", shape.eventDefinition);
+            // 边界事件是否中断（cancelActivity=false 为非中断，画虚线双圈）
+            node.put("interrupting", shape.interrupting);
+            // 多实例类型：parallel（三条竖线）/ sequential（三条横线），非多实例为 null
+            node.put("multiInstance", shape.multiInstance);
             node.put("x", shape.x);
             node.put("y", shape.y);
             node.put("width", shape.width);
@@ -326,6 +459,15 @@ public class ProcessTraceService {
             node.put("executions", executions);
             node.put("comments", comments);
 
+            // 调用子流程下钻：callActivity 的历史活动上记录了被调起的子流程实例 ID。
+            // 父子关系只存在于 ACT_HI_ACTINST.CALL_PROC_INST_ID_，ACT_HI_PROCINST 没有父实例字段，
+            // 被调用实例的 startUserId 也常常为空，靠它反推不可行。
+            // 同一个调用活动可能执行多次（循环 / 多实例），因此返回列表，前端据此选择要下钻的实例。
+            List<Map<String, Object>> calledInstances = calledInstances(instances);
+            node.put("calledInstances", calledInstances);
+            node.put("calledProcessInstanceId", calledInstances.isEmpty()
+                    ? null : calledInstances.get(0).get("processInstanceId"));
+
             // 兜底：源任务已归档查不到处理人时，用该节点的处理人作为沟通发起人
             if (!commTasks.isEmpty() && !assignees.isEmpty()) {
                 String nodeInitiator = assignees.iterator().next();
@@ -380,6 +522,8 @@ public class ProcessTraceService {
         result.put("processDefinitionName", pd == null ? null : pd.getName());
         result.put("processTitle", processTitle(hpi));
         result.put("state", hpi.getEndTime() == null ? "RUNNING" : "FINISHED");
+        // 子流程实例可能被直接打开（刷新页面、分享链接），带上父实例便于前端提示“返回上级”
+        result.put("parentProcessInstanceId", hpi.getSuperProcessInstanceId());
         result.put("startUserId", hpi.getStartUserId());
         result.put("startTime", hpi.getStartTime());
         result.put("endTime", hpi.getEndTime());
@@ -403,6 +547,43 @@ public class ProcessTraceService {
         stats.put("commPending", commPending);
         result.put("stats", stats);
         return result;
+    }
+
+    /**
+     * 收集某个调用活动调起的全部子流程实例。
+     *
+     * <p>父子关系只能从 {@code ACT_HI_ACTINST.CALL_PROC_INST_ID_} 取：{@code ACT_HI_PROCINST}
+     * 本身不带父实例字段，被调起实例的 startUserId 也经常为空，无法反推。
+     * 同一个调用活动可能执行多次（循环、多实例），所以按出现顺序去重后返回列表；
+     * 前端在只有一个实例时直接下钻，多个时让用户选择。</p>
+     */
+    private List<Map<String, Object>> calledInstances(List<HistoricActivityInstance> instances) {
+        Map<String, Map<String, Object>> result = new LinkedHashMap<>();
+        for (HistoricActivityInstance a : instances) {
+            String calledId = a.getCalledProcessInstanceId();
+            if (calledId == null || calledId.isBlank() || result.containsKey(calledId)) {
+                continue;
+            }
+            HistoricProcessInstance child = historyService.createHistoricProcessInstanceQuery()
+                    .processInstanceId(calledId).singleResult();
+            if (child == null) {
+                continue;
+            }
+            ProcessDefinition childDefinition = definition(child.getProcessDefinitionId());
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("processInstanceId", child.getId());
+            item.put("processDefinitionKey", child.getProcessDefinitionKey());
+            item.put("processDefinitionName", childDefinition == null ? null : childDefinition.getName());
+            item.put("processTitle", childDefinition == null ? null : childDefinition.getName());
+            // state 与主跟踪数据保持一致：RUNNING / FINISHED
+            item.put("state", child.getEndTime() == null ? "RUNNING" : "FINISHED");
+            item.put("startTime", child.getStartTime());
+            item.put("endTime", child.getEndTime());
+            item.put("durationInMillis", child.getDurationInMillis());
+            item.put("deleteReason", child.getDeleteReason());
+            result.put(calledId, item);
+        }
+        return new ArrayList<>(result.values());
     }
 
     private List<String> activeNodeNames(List<Map<String, Object>> nodes, List<String> activeIds) {
@@ -661,6 +842,9 @@ public class ProcessTraceService {
                 ns.id = ref;
                 ns.name = meta.name;
                 ns.type = meta.type;
+                ns.eventDefinition = meta.eventDefinition;
+                ns.interrupting = meta.interrupting;
+                ns.multiInstance = meta.multiInstance;
                 ns.x = num(bounds, "x");
                 ns.y = num(bounds, "y");
                 ns.width = num(bounds, "width");
@@ -739,9 +923,69 @@ public class ProcessTraceService {
             meta.name = attr(el, "name");
             meta.sourceRef = attr(el, "sourceRef");
             meta.targetRef = attr(el, "targetRef");
+            meta.eventDefinition = resolveEventDefinition(el);
+            // cancelActivity 缺省为 true（中断型）；显式 false 才是非中断边界事件
+            meta.interrupting = !"false".equalsIgnoreCase(attr(el, "cancelActivity"));
+            meta.multiInstance = resolveMultiInstance(el);
             metas.put(id, meta);
         }
         return metas;
+    }
+
+    /**
+     * 从事件元素的子节点里取事件定义类型，例如
+     * {@code <timerEventDefinition/>} → timer。
+     *
+     * <p>注意不能用 activityId 或 ACT_TYPE_ 判断：定时开始事件在 BPMN 里元素名仍是
+     * startEvent，在历史表里的 ACT_TYPE_ 才是 timerStartEvent，两者都不能直接用于取图标。</p>
+     */
+    private String resolveEventDefinition(Element el) {
+        NodeList children = el.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() != Node.ELEMENT_NODE) {
+                continue;
+            }
+            String local = child.getLocalName() == null ? child.getNodeName() : child.getLocalName();
+            if (local.endsWith(EVENT_DEF_SUFFIX) && local.length() > EVENT_DEF_SUFFIX.length()) {
+                String key = local.substring(0, local.length() - EVENT_DEF_SUFFIX.length());
+                return key.substring(0, 1).toLowerCase() + key.substring(1);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 从活动元素的子节点里取多实例类型，例如
+     * {@code <multiInstanceLoopCharacteristics isSequential="true"/>} → sequential。
+     *
+     * <p>不能用历史表的 activityId 判断：多实例体被记为
+     * {@code userTask1#multiInstanceBody}，而每个实例记录的仍是 {@code userTask1}，
+     * 两者都看不出这个活动本身是不是多实例。</p>
+     */
+    private String resolveMultiInstance(Element el) {
+        NodeList children = el.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() != Node.ELEMENT_NODE) {
+                continue;
+            }
+            String local = child.getLocalName() == null ? child.getNodeName() : child.getLocalName();
+            if ("multiInstanceLoopCharacteristics".equals(local)) {
+                Element mi = (Element) child;
+                return "true".equalsIgnoreCase(attr(mi, "isSequential")) ? "sequential" : "parallel";
+            }
+        }
+        return null;
+    }
+
+    /** 事件节点带上事件定义前缀，多实例节点再带上并行/顺序前缀 */
+    private String typeLabel(NodeShape shape) {
+        String base = TYPE_LABELS.getOrDefault(shape.type, shape.type);
+        String prefix = shape.eventDefinition == null ? null : EVENT_DEF_LABELS.get(shape.eventDefinition);
+        String label = prefix == null ? base : prefix + base;
+        String miPrefix = shape.multiInstance == null ? null : MULTI_INSTANCE_LABELS.get(shape.multiInstance);
+        return miPrefix == null ? label : miPrefix + label;
     }
 
     private Element firstDescendant(Element parent, String localName) {
@@ -789,12 +1033,18 @@ public class ProcessTraceService {
         private String name;
         private String sourceRef;
         private String targetRef;
+        private String eventDefinition;
+        private boolean interrupting = true;
+        private String multiInstance;
     }
 
     private static class NodeShape {
         private String id;
         private String name;
         private String type;
+        private String eventDefinition;
+        private boolean interrupting = true;
+        private String multiInstance;
         private double x;
         private double y;
         private double width;
