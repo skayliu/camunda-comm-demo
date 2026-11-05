@@ -30,6 +30,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * 流程图跟踪服务：把 Camunda 的 BPMN DI（节点坐标、连线路径）与历史活动实例
@@ -40,6 +42,8 @@ import java.util.Set;
  */
 @Service
 public class ProcessTraceService {
+
+    private static final Logger LOG = Logger.getLogger(ProcessTraceService.class.getName());
 
     /** BPMN 2.0 模型命名空间 */
     private static final String BPMN_NS = "http://www.omg.org/spec/BPMN/20100524/MODEL";
@@ -152,6 +156,32 @@ public class ProcessTraceService {
         List<HistoricTaskInstance> historicTasks = historyService.createHistoricTaskInstanceQuery()
                 .processInstanceId(processInstanceId)
                 .list();
+        // 沟通的发起人是「源待办的处理人」，需要按 sourceTaskId 回查历史任务
+        Map<String, HistoricTaskInstance> taskById = new LinkedHashMap<>();
+        for (HistoricTaskInstance t : historicTasks) {
+            taskById.put(t.getId(), t);
+        }
+        // 源待办的节点 key / 处理人：历史任务已归档或运行时任务被删时，从历史活动实例兜底
+        Map<String, String> sourceDefKeyByTaskId = new LinkedHashMap<>();
+        Map<String, String> sourceAssigneeByTaskId = new LinkedHashMap<>();
+        for (HistoricTaskInstance t : historicTasks) {
+            if (t.getId() == null) {
+                continue;
+            }
+            sourceDefKeyByTaskId.put(t.getId(), t.getTaskDefinitionKey());
+            if (t.getAssignee() != null && !t.getAssignee().isBlank()) {
+                sourceAssigneeByTaskId.put(t.getId(), t.getAssignee());
+            }
+        }
+        for (HistoricActivityInstance a : activities) {
+            if (a.getTaskId() == null) {
+                continue;
+            }
+            sourceDefKeyByTaskId.putIfAbsent(a.getTaskId(), a.getActivityId());
+            if (a.getAssignee() != null && !a.getAssignee().isBlank()) {
+                sourceAssigneeByTaskId.putIfAbsent(a.getTaskId(), a.getAssignee());
+            }
+        }
         for (HistoricTaskInstance t : historicTasks) {
             if (!BizCommTask.isCommTaskKey(t.getTaskDefinitionKey())) {
                 continue;
@@ -168,8 +198,46 @@ public class ProcessTraceService {
             if (sourceKey == null) {
                 continue;
             }
+            String initiator = null;
+            if (record != null && record.getSourceTaskId() != null) {
+                HistoricTaskInstance sourceTask = taskById.get(record.getSourceTaskId());
+                if (sourceTask != null) {
+                    initiator = sourceTask.getAssignee();
+                }
+            }
             commByNode.computeIfAbsent(sourceKey, k -> new ArrayList<>())
-                    .add(toCommTaskVO(t, record));
+                    .add(toCommTaskVO(t, record, initiator));
+        }
+
+        // 已收回的沟通必须从业务表补：收回走 taskService.deleteTask(...)，
+        // Camunda 会把对应的 ACT_HI_TASKINST 历史任务一并删除，历史任务查询根本拿不到这些记录。
+        // 这里按「该实例上出现过的任务 ID」反查 BIZ_COMM_TASK_，把历史里缺失的记录还原出来。
+        // 兜底查询失败（如老库缺 BIZ_COMM_TASK_ 表）时不能拖垮整张跟踪图，只损失已收回记录。
+        List<BizCommTask> withdrawnRecords = Collections.emptyList();
+        try {
+            withdrawnRecords = communicationService
+                    .getCommRecordsBySourceTaskIds(sourceDefKeyByTaskId.keySet());
+        } catch (RuntimeException ex) {
+            LOG.log(Level.WARNING, "跟踪图补全已收回沟通失败，processInstanceId=" + processInstanceId, ex);
+        }
+        for (BizCommTask record : withdrawnRecords) {
+            if (!BizCommTask.STATUS_WITHDRAWN.equals(record.getStatus())) {
+                continue;
+            }
+            // 历史任务还在的已由上面的循环展示（如收回后又重新发起），避免同一条记录出现两次
+            if (record.getCamundaTaskId() != null && taskById.containsKey(record.getCamundaTaskId())) {
+                continue;
+            }
+            String sourceKey = record.getSourceTaskDefKey() != null
+                    ? record.getSourceTaskDefKey()
+                    : sourceDefKeyByTaskId.get(record.getSourceTaskId());
+            if (sourceKey == null) {
+                continue;
+            }
+            String initiator = record.getSourceTaskId() == null
+                    ? null : sourceAssigneeByTaskId.get(record.getSourceTaskId());
+            commByNode.computeIfAbsent(sourceKey, k -> new ArrayList<>())
+                    .add(toWithdrawnCommVO(record, initiator, sourceKey));
         }
 
         Diagram diagram = parseDiagram(hpi.getProcessDefinitionId());
@@ -258,29 +326,48 @@ public class ProcessTraceService {
             node.put("executions", executions);
             node.put("comments", comments);
 
+            // 兜底：源任务已归档查不到处理人时，用该节点的处理人作为沟通发起人
+            if (!commTasks.isEmpty() && !assignees.isEmpty()) {
+                String nodeInitiator = assignees.iterator().next();
+                for (Map<String, Object> c : commTasks) {
+                    if (c.get("initiator") == null) {
+                        c.put("initiator", nodeInitiator);
+                    }
+                }
+            }
+
             int pendingComm = 0;
+            int withdrawnComm = 0;
             for (Map<String, Object> c : commTasks) {
                 if (Boolean.TRUE.equals(c.get("pending"))) {
                     pendingComm++;
+                }
+                if (BizCommTask.STATUS_WITHDRAWN.equals(c.get("status"))) {
+                    withdrawnComm++;
                 }
             }
             commTotal += commTasks.size();
             commPending += pendingComm;
             node.put("commTasks", commTasks);
             node.put("pendingCommCount", pendingComm);
+            // 已收回的条数单列，前端据此在“沟通 N 条”上标注，避免收回记录被当成仍在进行
+            node.put("withdrawnCommCount", withdrawnComm);
             node.put("commLocked", pendingComm > 0);
 
             nodes.add(node);
         }
 
-        // 连线：目标的节点只要有执行实例，说明这条路径被走过
+        // 连线：必须由两端节点的执行时序推断，不能只看“目标节点有实例”
         List<Map<String, Object>> edges = new ArrayList<>();
         for (EdgeShape e : diagram.edges) {
             Map<String, Object> edge = new LinkedHashMap<>();
             edge.put("id", e.id);
             edge.put("source", e.source);
             edge.put("target", e.target);
-            edge.put("taken", byNode.containsKey(e.target));
+            String edgeState = resolveEdgeState(e, byNode);
+            edge.put("taken", !EDGE_NONE.equals(edgeState));
+            // 已到达但下游仍在执行：前端渲染为“流转中”的蓝色，与已走完（绿）/未到达（灰）区分
+            edge.put("active", EDGE_ACTIVE.equals(edgeState));
             edge.put("waypoints", e.waypoints);
             edges.add(edge);
         }
@@ -328,6 +415,58 @@ public class ProcessTraceService {
         return names;
     }
 
+    /** 连线执行态：未到达 */
+    private static final String EDGE_NONE = "NONE";
+    /** 连线执行态：已走过，且下游节点已结束 */
+    private static final String EDGE_TAKEN = "TAKEN";
+    /** 连线执行态：已到达，但下游节点仍在执行（进行中） */
+    private static final String EDGE_ACTIVE = "ACTIVE";
+
+    /**
+     * 推断一条连线的执行态。
+     *
+     * <p>Camunda 的 ACT_HI_ACTINST 只记录节点活动，不记录连线（full 历史级别也不写
+     * sequenceFlow），所以只能由两端节点的执行时序推断。早期实现只看
+     * “目标节点是否存在活动实例”，在并行/汇聚网关处会失真：网关一挂起就已有
+     * 活动实例，于是所有指向它的入边（包括尚未到达的分支）都会被点亮。</p>
+     *
+     * <p>这里补上源侧约束：源节点必须真正走完（有结束时间且未被取消），并且目标节点
+     * 必须在源节点结束之后才开始（允许同毫秒）。这样仍在办理中的分支不会提前点亮。</p>
+     *
+     * <p>在此基础上再区分「已走完」与「进行中」：同一连线两端都满足时序关系时，
+     * 若目标节点仍有未结束、未取消的活动实例，说明流转已到达但下游还没办完，
+     * 返回 {@link #EDGE_ACTIVE}；目标已全部结束才返回 {@link #EDGE_TAKEN}。
+     * 多实例场景下一旦存在进行中的实例，以进行中优先，避免“部分完成”被画成已完成。</p>
+     */
+    private String resolveEdgeState(EdgeShape edge, Map<String, List<HistoricActivityInstance>> byNode) {
+        List<HistoricActivityInstance> sources = byNode.getOrDefault(edge.source, Collections.emptyList());
+        List<HistoricActivityInstance> targets = byNode.getOrDefault(edge.target, Collections.emptyList());
+        if (sources.isEmpty() || targets.isEmpty()) {
+            return EDGE_NONE;
+        }
+        boolean taken = false;
+        for (HistoricActivityInstance source : sources) {
+            // 源还停在原地（endTime 为空），或者该活动被取消，都不代表走过它的出边
+            if (source.getEndTime() == null || source.isCanceled()) {
+                continue;
+            }
+            for (HistoricActivityInstance target : targets) {
+                if (target.getStartTime() == null) {
+                    continue;
+                }
+                // 同一事务内前一节点结束与后一节点开始可能是同一毫秒，留 1ms 容差
+                if (target.getStartTime().getTime() + 1L < source.getEndTime().getTime()) {
+                    continue;
+                }
+                if (target.getEndTime() == null && !target.isCanceled()) {
+                    return EDGE_ACTIVE;
+                }
+                taken = true;
+            }
+        }
+        return taken ? EDGE_TAKEN : EDGE_NONE;
+    }
+
     private String resolveStatus(List<HistoricActivityInstance> instances) {
         if (instances.isEmpty()) {
             return STATUS_PENDING;
@@ -352,24 +491,94 @@ public class ProcessTraceService {
         return fallback;
     }
 
-    /** 沟通旁路任务：状态以业务表为准，业务记录缺失时按引擎任务是否结束兜底 */
-    private Map<String, Object> toCommTaskVO(HistoricTaskInstance t, BizCommTask record) {
+    /**
+     * 沟通旁路任务：状态以业务表为准，业务记录缺失时按引擎任务是否结束兜底。
+     *
+     * <p>除执行状态外，这里补齐「沟通明细」需要的会话字段：沟通对象、沟通内容、
+     * 反馈内容/反馈人/反馈时间、创建时间，以及会话归属（rootTaskId）和追问关系
+     * （parentCommTaskId），前端据此按会话分组并缩进展示追问。</p>
+     */
+    private Map<String, Object> toCommTaskVO(HistoricTaskInstance t, BizCommTask record, String initiator) {
         String bizStatus = record != null
                 ? record.getStatus()
                 : (t.getEndTime() == null ? BizCommTask.STATUS_PENDING : "FINISHED");
 
         Map<String, Object> vo = new LinkedHashMap<>();
+        // 已反馈但业务记录缺字段时，用引擎任务兜底：反馈人即沟通对象，反馈时间取任务结束时间
+        String replyUserId = record == null ? null : record.getReplyUserId();
+        Date replyTime = record == null ? null : record.getReplyTime();
+        if (BizCommTask.STATUS_REPLIED.equals(bizStatus)) {
+            if (replyUserId == null || replyUserId.isEmpty()) {
+                replyUserId = t.getAssignee();
+            }
+            if (replyTime == null) {
+                replyTime = t.getEndTime();
+            }
+        }
         vo.put("taskId", t.getId());
         vo.put("taskDefKey", t.getTaskDefinitionKey());
         vo.put("name", t.getName());
+        // 沟通任务的 assignee 是沟通对象（接收方），发起人另放 initiator
         vo.put("assignee", t.getAssignee());
+        vo.put("initiator", initiator);
+        vo.put("targetId", record == null ? null : record.getTargetId());
+        vo.put("targetName", record == null ? null : record.getTargetName());
+        vo.put("targetType", record == null ? null : record.getTargetType());
         vo.put("isFollowUp", record != null && record.getParentCommTaskId() != null);
+        vo.put("parentCommTaskId", record == null ? null : record.getParentCommTaskId());
+        vo.put("rootTaskId", record == null ? null : record.getRootTaskId());
+        // 沟通旁路任务ID 读 CAMUNDA_TASK_ID_；DEPT_PROC_INST_ID_ 是部门子流程实例ID，
+        // 当前恒为 null，按 deptProcInstId 原样外发即可（预留字段，前端据此展示部门流转）。
+        vo.put("camundaTaskId", record == null ? null : record.getCamundaTaskId());
+        vo.put("deptProcInstId", record == null ? null : record.getDeptProcInstId());
         vo.put("status", bizStatus);
         vo.put("pending", BizCommTask.STATUS_PENDING.equals(bizStatus));
         vo.put("content", record == null ? null : record.getContent());
+        vo.put("replyContent", record == null ? null : record.getReplyContent());
+        vo.put("replyUserId", replyUserId);
+        vo.put("replyTime", replyTime);
+        vo.put("withdrawTime", record == null ? null : record.getWithdrawTime());
         vo.put("startTime", t.getStartTime());
         vo.put("endTime", t.getEndTime());
+        vo.put("createTime", record != null && record.getCreateTime() != null
+                ? record.getCreateTime() : t.getStartTime());
         vo.put("durationInMillis", t.getDurationInMillis());
+        return vo;
+    }
+
+    /**
+     * 已收回的沟通：引擎任务已被删除，{@link HistoricTaskInstance} 不存在，
+     * 只能由业务记录 BIZ_COMM_TASK_ 还原成与 {@link #toCommTaskVO} 同构的 VO，
+     * 前端因此无需为“已收回”单独写一套渲染分支。
+     */
+    private Map<String, Object> toWithdrawnCommVO(BizCommTask record, String initiator, String sourceKey) {
+        Map<String, Object> vo = new LinkedHashMap<>();
+        // 历史任务已删，taskId 用业务记录 ID 兜底：它同样是稳定的唯一键，前端用它做 key
+        vo.put("taskId", record.getId());
+        vo.put("taskDefKey", BizCommTask.buildCommTaskKey(sourceKey));
+        vo.put("name", "沟通（已收回）");
+        vo.put("assignee", record.getTargetId());
+        vo.put("initiator", initiator);
+        vo.put("targetId", record.getTargetId());
+        vo.put("targetName", record.getTargetName());
+        vo.put("targetType", record.getTargetType());
+        vo.put("isFollowUp", record.getParentCommTaskId() != null);
+        vo.put("parentCommTaskId", record.getParentCommTaskId());
+        vo.put("rootTaskId", record.getRootTaskId() != null ? record.getRootTaskId() : record.getId());
+        vo.put("camundaTaskId", record.getCamundaTaskId());
+        vo.put("deptProcInstId", record.getDeptProcInstId());
+        vo.put("status", BizCommTask.STATUS_WITHDRAWN);
+        vo.put("pending", false);
+        vo.put("withdrawn", true);
+        vo.put("content", record.getContent());
+        vo.put("replyContent", record.getReplyContent());
+        vo.put("replyUserId", record.getReplyUserId());
+        vo.put("replyTime", record.getReplyTime());
+        vo.put("withdrawTime", record.getWithdrawTime());
+        vo.put("startTime", record.getCreateTime());
+        vo.put("endTime", null);
+        vo.put("createTime", record.getCreateTime());
+        vo.put("durationInMillis", null);
         return vo;
     }
 

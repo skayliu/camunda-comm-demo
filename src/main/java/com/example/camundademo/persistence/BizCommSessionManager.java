@@ -40,6 +40,17 @@ public class BizCommSessionManager extends AbstractManager implements Session {
     }
 
     /**
+     * 取该待办下全部沟通会话（含已结束），按发起时间升序。
+     * 同一待办可以多次发起沟通，每次都对应一个新会话，审批界面需要完整历史。
+     */
+    @SuppressWarnings("unchecked")
+    public java.util.List<BizCommSession> findByRootTask(String rootTaskId) {
+        clearQueryCache();
+        return (java.util.List<BizCommSession>) getDbSqlSession().selectList(
+                MAPPER_NAMESPACE + ".selectByRootTask", rootTaskId);
+    }
+
+    /**
      * 避免同一命令内同参数查询命中 MyBatis 一级缓存而读到旧状态。
      */
     private void clearQueryCache() {

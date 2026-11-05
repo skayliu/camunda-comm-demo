@@ -166,6 +166,337 @@ class CommunicationFlowTest {
         return (List<Map<String, Object>>) get("/api/comm/status/" + taskId, "manager").get("commTasks");
     }
 
+    /**
+     * 发起后才发现漏了人：再次发起应作为“补充沟通对象”生效——
+     * 沿用原会话、只给新增人员建任务、已在沟通中的人员自动跳过。
+     */
+    @Test
+    @Order(9)
+    void startAgainWhileActiveAppendsTargets() {
+        List<Map<String, String>> first = new ArrayList<>();
+        first.add(target("USER", "alice", "张三"));
+        String pid = startAndSendToManager("applicant", "请核实发票信息", first);
+        String managerTaskId = findTaskInProcess("manager", "manager_review", pid);
+        String sessionId = (String) get("/api/comm/status/" + managerTaskId, "manager").get("sessionId");
+
+        // 再点一次“发起沟通”：带上原对象 + 新增 bob，应只新增 bob，并沿用同一会话
+        Map<String, Object> req = new HashMap<>();
+        req.put("taskId", managerTaskId);
+        req.put("content", "补充：请 bob 一起核对");
+        List<Map<String, String>> targets = new ArrayList<>();
+        targets.add(target("USER", "alice", "张三"));
+        targets.add(target("USER", "bob", "李四"));
+        req.put("targets", targets);
+
+        Map<String, Object> resp = post("/api/comm/start", req, "manager");
+        assertEquals(Boolean.FALSE, Boolean.TRUE.equals(resp.get("error")), "补充对象不应报错: " + resp);
+        assertEquals(sessionId, resp.get("sessionId"), "补充对象应沿用原会话: " + resp);
+        assertEquals(Boolean.TRUE, resp.get("appended"), "应标记为补充模式: " + resp);
+        assertEquals(List.of("李四"), resp.get("addedTargets"), "只应新增漏加的人员: " + resp);
+        assertEquals(List.of("张三"), resp.get("skippedTargets"), "已在沟通中的人员应跳过: " + resp);
+
+        List<Map<String, Object>> commTasks = commTasksOf(managerTaskId);
+        assertEquals(2, commTasks.size(), "沟通对象数量应为 2: " + commTasks);
+        assertEquals("PENDING", commTaskOf(commTasks, "bob").get("status"), "新增人员状态异常: " + commTasks);
+        assertTrue(tasks("bob").stream().anyMatch(t -> "manager_review#COMM".equals(t.get("taskDefKey"))),
+                "新增人员未收到沟通待办: " + dumpAllTasks());
+
+        // 选的全是已在沟通中的人时，给出明确业务提示，而不是静默成功
+        Map<String, Object> dup = new HashMap<>(req);
+        dup.put("targets", List.of(target("USER", "alice", "张三"), target("USER", "bob", "李四")));
+        Map<String, Object> dupResp = post("/api/comm/start", dup, "manager");
+        assertEquals(Boolean.TRUE, dupResp.get("error"), "重复选择同一批人应给出业务提示: " + dupResp);
+        assertTrue(String.valueOf(dupResp.get("message")).contains("已在本次沟通中"),
+                "提示不明确: " + dupResp);
+
+        // 清理本用例的沟通，避免影响后续用例
+        replyTo(commTasksOf(managerTaskId), "alice", "已核对");
+        replyTo(commTasksOf(managerTaskId), "bob", "已核对");
+    }
+
+    /**
+     * 沟通待办里也能再次发起沟通：当前沟通对象把问题转给其他人补充核实，
+     * 新记录挂在当前记录下，审批人能看到完整的追问链，且源待办保持锁定。
+     */
+    @Test
+    @Order(10)
+    @SuppressWarnings("unchecked")
+    void forwardFromCommTaskCreatesChildRecord() {
+        List<Map<String, String>> targets = new ArrayList<>();
+        targets.add(target("USER", "alice", "张三"));
+        String pid = startAndSendToManager("applicant6", "请核实付款账号", targets);
+        String managerTaskId = findTaskInProcess("manager", "manager_review", pid);
+
+        List<Map<String, Object>> records = commTasksOf(managerTaskId);
+        assertEquals(1, records.size(), "首轮沟通记录数量异常: " + records);
+        Map<String, Object> aliceRecord = records.get(0);
+
+        // alice 打开自己的沟通待办：应允许再次发起沟通
+        String aliceCommTaskId = tasks("alice").stream()
+                .filter(t -> BizCommTask.buildCommTaskKey("manager_review").equals(t.get("taskDefKey")))
+                .filter(t -> pid.equals(t.get("processInstanceId")))
+                .map(t -> (String) t.get("taskId"))
+                .findFirst().orElseThrow(() -> new IllegalStateException(
+                        "未找到 alice 的沟通待办: " + tasks("alice") + "；引擎内全部任务: " + dumpAllTasks()));
+        Map<String, Object> selfStatus = get("/api/comm/status/" + aliceCommTaskId, "alice");
+        assertEquals(Boolean.TRUE, selfStatus.get("canForwardComm"),
+                "沟通对象应能在反馈界面再次发起沟通: " + selfStatus);
+
+        Map<String, Object> req = new HashMap<>();
+        req.put("commTaskRecordId", aliceRecord.get("id"));
+        req.put("content", "请 bob 补充核对收款账户");
+        req.put("targets", List.of(target("USER", "bob", "李四")));
+        Map<String, Object> resp = post("/api/comm/forward", req, "alice");
+        assertEquals(Boolean.FALSE, Boolean.TRUE.equals(resp.get("error")), "转交沟通失败: " + resp);
+        assertEquals(List.of("李四"), resp.get("addedTargets"), "转交对象异常: " + resp);
+
+        assertTrue(tasks("bob").stream()
+                        .anyMatch(t -> BizCommTask.buildCommTaskKey("manager_review").equals(t.get("taskDefKey"))
+                                && pid.equals(t.get("processInstanceId"))),
+                "被转交人未收到沟通待办: " + dumpAllTasks());
+
+        // 审批人视角：bob 的记录是 alice 那条的子记录，父链可回溯
+        Map<String, Object> status = get("/api/comm/status/" + managerTaskId, "manager");
+        assertEquals("COMMUNICATING", status.get("bizStatus"), "转交后源待办应保持锁定: " + status);
+        List<Map<String, Object>> all = (List<Map<String, Object>>) status.get("commTasks");
+        assertEquals(2, all.size(), "转交后应新增一条沟通记录: " + all);
+        Map<String, Object> bobRecord = commTaskOf(all, "bob");
+        assertEquals(aliceRecord.get("id"), bobRecord.get("parentCommTaskId"),
+                "转交记录应挂在当前沟通记录下: " + bobRecord);
+        assertEquals(Boolean.TRUE, bobRecord.get("isFollowUp"), "转交记录应标记为追问: " + bobRecord);
+        assertEquals("张三", bobRecord.get("parentTargetName"), "父级对象名应可回读: " + bobRecord);
+
+        // 非本人不能代替 alice 转交
+        Map<String, Object> forged = new HashMap<>(req);
+        forged.put("targets", List.of(target("USER", "carol", "王五")));
+        Map<String, Object> forgedResp = post("/api/comm/forward", forged, "bob");
+        assertEquals(Boolean.TRUE, forgedResp.get("error"), "非本人转交应被拒绝: " + forgedResp);
+
+        // 也不能把沟通再发给发起人（manager）：只能完成反馈，或转给其他人员
+        Map<String, Object> toInitiator = new HashMap<>();
+        toInitiator.put("commTaskRecordId", aliceRecord.get("id"));
+        toInitiator.put("content", "退回给发起人");
+        toInitiator.put("targets", List.of(target("USER", "manager", "经理")));
+        Map<String, Object> initiatorResp = post("/api/comm/forward", toInitiator, "alice");
+        assertEquals(Boolean.TRUE, initiatorResp.get("error"), "不应允许把沟通转回给发起人: " + initiatorResp);
+        assertTrue(String.valueOf(initiatorResp.get("message")).contains("发起人"),
+                "拒绝原因应指向发起人: " + initiatorResp);
+
+        // 已把问题转给 bob，bob 未反馈前 alice 不能先提交自己的反馈完成
+        Map<String, Object> earlyReply = new HashMap<>();
+        earlyReply.put("commTaskRecordId", aliceRecord.get("id"));
+        earlyReply.put("content", "账号无误");
+        Map<String, Object> earlyResp = post("/api/comm/reply", earlyReply, "alice");
+        assertEquals(Boolean.TRUE, earlyResp.get("error"),
+                "存在未反馈的下游沟通时不应允许提交反馈: " + earlyResp);
+        assertTrue(String.valueOf(earlyResp.get("message")).contains("未反馈"),
+                "拒绝原因应指明还有未反馈的沟通: " + earlyResp);
+
+        // 状态接口同步给出 canReply=false 与阻塞人，前端据此禁用按钮
+        Map<String, Object> aliceStatus = get("/api/comm/status/" + aliceCommTaskId, "alice");
+        assertEquals(Boolean.FALSE, aliceStatus.get("canReply"), "未反馈下游时应禁止提交反馈: " + aliceStatus);
+        assertEquals("李四", aliceStatus.get("replyBlockedBy"), "应指出是谁未反馈: " + aliceStatus);
+
+        // 清理：先 bob 后 alice，全部反馈后解锁
+        replyTo(commTasksOf(managerTaskId), "bob", "账户已核对");
+        replyTo(commTasksOf(managerTaskId), "alice", "账号无误");
+        assertEquals("NORMAL", get("/api/comm/status/" + managerTaskId, "manager").get("bizStatus"),
+                "全部反馈后应解锁");
+    }
+
+    /**
+     * 转交人可收回自己转给下级的沟通：下级长时间不反馈时，上级不会被永久阻塞，
+     * 收回后自己的反馈可以正常提交，源待办随之解锁。
+     */
+    @Test
+    @Order(11)
+    @SuppressWarnings("unchecked")
+    void forwarderCanWithdrawOwnChildComm() {
+        List<Map<String, String>> targets = new ArrayList<>();
+        targets.add(target("USER", "alice", "张三"));
+        String pid = startAndSendToManager("applicant5", "请核实收款账户", targets);
+        String managerTaskId = findTaskInProcess("manager", "manager_review", pid);
+        Map<String, Object> aliceRecord = commTasksOf(managerTaskId).get(0);
+
+        String aliceCommTaskId = tasks("alice").stream()
+                .filter(t -> BizCommTask.buildCommTaskKey("manager_review").equals(t.get("taskDefKey")))
+                .filter(t -> pid.equals(t.get("processInstanceId")))
+                .map(t -> (String) t.get("taskId"))
+                .findFirst().orElseThrow(() -> new IllegalStateException("未找到 alice 的沟通待办: " + dumpAllTasks()));
+
+        // alice 把沟通转给 bob
+        Map<String, Object> forwardReq = new HashMap<>();
+        forwardReq.put("commTaskRecordId", aliceRecord.get("id"));
+        forwardReq.put("content", "请 bob 补充核对收款账户");
+        forwardReq.put("targets", List.of(target("USER", "bob", "李四")));
+        Map<String, Object> forwardResp = post("/api/comm/forward", forwardReq, "alice");
+        // /api/comm/forward 返回的是 sessionId/currentRound/addedTargets，不带 result 字段
+        assertEquals(List.of("李四"), forwardResp.get("addedTargets"), "转交失败: " + forwardResp);
+
+        List<Map<String, Object>> all = commTasksOf(managerTaskId);
+        Map<String, Object> bobRecord = commTaskOf(all, "bob");
+        assertEquals(aliceRecord.get("id"), bobRecord.get("parentCommTaskId"), "转交记录父链异常: " + bobRecord);
+
+        // 工作台详情：alice 打开自己的沟通待办时，bob 那条应标记为“可收回”
+        Map<String, Object> detail = get("/api/wb/task/" + aliceCommTaskId, "alice");
+        List<Map<String, Object>> sessionTasks = (List<Map<String, Object>>) detail.get("sessionTasks");
+        Map<String, Object> bobInDetail = sessionTasks.stream()
+                .filter(t -> "bob".equals(t.get("targetId"))).findFirst()
+                .orElseThrow(() -> new IllegalStateException("同轮进度中缺 bob: " + sessionTasks));
+        assertEquals(Boolean.TRUE, bobInDetail.get("canWithdraw"),
+                "转交人应能收回自己转出去的沟通: " + bobInDetail);
+
+        // bob 自己不能收回（他既不是发起人，也不是这条记录的转交人）
+        Map<String, Object> bobWithdrawReq = new HashMap<>();
+        bobWithdrawReq.put("commTaskIds", List.of(bobRecord.get("id")));
+        Map<String, Object> bobResp = post("/api/comm/withdraw/" + bobRecord.get("sessionId"), bobWithdrawReq, "bob");
+        assertEquals(Boolean.TRUE, bobResp.get("error"), "沟通对象不应能自行收回: " + bobResp);
+
+        // alice 收回 bob 的记录：成功、bob 待办消失、alice 恢复可反馈
+        Map<String, Object> withdrawReq = new HashMap<>();
+        withdrawReq.put("commTaskIds", List.of(bobRecord.get("id")));
+        assertEquals("ok", post("/api/comm/withdraw/" + bobRecord.get("sessionId"), withdrawReq, "alice").get("result"),
+                "转交人收回失败");
+
+        assertEquals("WITHDRAWN", commTaskOf(commTasksOf(managerTaskId), "bob").get("status"), "记录应标记已收回");
+        assertTrue(tasks("bob").stream().noneMatch(t -> pid.equals(t.get("processInstanceId"))),
+                "收回后 bob 的沟通待办应被删除: " + dumpAllTasks());
+        assertEquals("COMMUNICATING", get("/api/comm/status/" + managerTaskId, "manager").get("bizStatus"),
+                "其他对象仍待反馈时源待办应保持锁定");
+        assertEquals(Boolean.TRUE, get("/api/comm/status/" + aliceCommTaskId, "alice").get("canReply"),
+                "收回下游后 alice 应可提交反馈");
+
+        replyTo(commTasksOf(managerTaskId), "alice", "账户无误");
+        assertEquals("NORMAL", get("/api/comm/status/" + managerTaskId, "manager").get("bizStatus"),
+                "全部反馈后应解锁");
+    }
+
+    /**
+     * 上游可收回整条下游链，而不只是自己直接转出去的那一条。
+     *
+     * <p>A 发起给 B，B 转给 C 与 D，C 再转给 E：A 可收回 B/C/D/E，B 可收回 C/D/E，
+     * C 只可收回 E；与 C 平级的 D 无权收回 E，任何接收人都不能收回自己那条。</p>
+     */
+    @Test
+    @Order(12)
+    void upstreamCanWithdrawWholeDownstreamChain() {
+        List<Map<String, String>> targets = new ArrayList<>();
+        targets.add(target("USER", "alice", "张三"));
+        String pid = startAndSendToManager("applicant6", "请核实收款账户", targets);
+        String managerTaskId = findTaskInProcess("manager", "manager_review", pid);
+        String aliceCommTaskId = commTaskIdOf("alice", pid);
+        Map<String, Object> aliceRecord = commTasksOf(managerTaskId).get(0);
+
+        // B(alice) -> C(carol)、D(dave)
+        assertEquals(List.of("Carol", "Dave"),
+                forwardComm(String.valueOf(aliceRecord.get("id")),
+                        List.of(target("USER", "carol", "Carol"), target("USER", "dave", "Dave")), "alice")
+                        .get("addedTargets"), "alice 转交失败");
+
+        // C(carol) -> E(erin)
+        Map<String, Object> carolRecord = commTaskOf(commTasksOf(managerTaskId), "carol");
+        assertEquals(List.of("Erin"),
+                forwardComm(String.valueOf(carolRecord.get("id")),
+                        List.of(target("USER", "erin", "Erin")), "carol").get("addedTargets"),
+                "carol 转交失败");
+
+        Map<String, Object> daveRecord = commTaskOf(commTasksOf(managerTaskId), "dave");
+        Map<String, Object> erinRecord = commTaskOf(commTasksOf(managerTaskId), "erin");
+        String erinRecordId = String.valueOf(erinRecord.get("id"));
+
+        // B 视角：C、D 是直接下级，E 隔了一层，都应可收回；自己那条不可收回
+        Map<String, Boolean> asAlice = sessionWithdrawFlags(aliceCommTaskId, "alice");
+        assertEquals(Boolean.TRUE, asAlice.get(carolRecord.get("id")), "B 应能收回直接下级 C: " + asAlice);
+        assertEquals(Boolean.TRUE, asAlice.get(daveRecord.get("id")), "B 应能收回直接下级 D: " + asAlice);
+        assertEquals(Boolean.TRUE, asAlice.get(erinRecordId), "B 应能收回隔级下游 E: " + asAlice);
+        assertEquals(Boolean.FALSE, asAlice.get(String.valueOf(aliceRecord.get("id"))),
+                "接收人不应能收回自己那条: " + asAlice);
+
+        // C 视角：只能收回自己转出去的 E
+        Map<String, Boolean> asCarol = sessionWithdrawFlags(commTaskIdOf("carol", pid), "carol");
+        assertEquals(Boolean.TRUE, asCarol.get(erinRecordId), "C 应能收回 E: " + asCarol);
+        assertEquals(Boolean.FALSE, asCarol.get(daveRecord.get("id")), "C 不应能收回平级 D: " + asCarol);
+
+        // D 视角：E 不在自己的下游，无权收回
+        Map<String, Boolean> asDave = sessionWithdrawFlags(commTaskIdOf("dave", pid), "dave");
+        assertEquals(Boolean.FALSE, asDave.get(erinRecordId), "平级 D 不应能收回 E: " + asDave);
+
+        // 平级对象直接发请求也应被拒绝，而不只是前端不显示按钮
+        Map<String, Object> daveWithdraw = new HashMap<>();
+        daveWithdraw.put("commTaskIds", List.of(erinRecordId));
+        assertEquals(Boolean.TRUE,
+                post("/api/comm/withdraw/" + erinRecord.get("sessionId"), daveWithdraw, "dave").get("error"),
+                "平级 D 收回 E 应被后端拒绝");
+
+        // B 收回：一次取消自己下游的全部未反馈沟通（C、D、E），而不是只收回被点的那一条。
+        // 点 E 只是入口，B 的下游整条链都会被收回，不需要逐条点击。
+        Map<String, Object> withdrawReq = new HashMap<>();
+        withdrawReq.put("commTaskIds", List.of(erinRecordId));
+        Map<String, Object> bWithdraw =
+                post("/api/comm/withdraw/" + erinRecord.get("sessionId"), withdrawReq, "alice");
+        assertEquals("ok", bWithdraw.get("result"), "B 收回下游失败: " + bWithdraw);
+        assertEquals(3, ((Number) bWithdraw.get("withdrawn")).intValue(),
+                "B 应一次收回 C、D、E 三条: " + bWithdraw);
+        assertEquals("WITHDRAWN", commTaskOf(commTasksOf(managerTaskId), "carol").get("status"),
+                "C 应随下游一起收回");
+        assertEquals("WITHDRAWN", commTaskOf(commTasksOf(managerTaskId), "dave").get("status"),
+                "D 应随下游一起收回");
+        assertEquals("WITHDRAWN", commTaskOf(commTasksOf(managerTaskId), "erin").get("status"),
+                "E 应标记已收回");
+        assertTrue(tasks("carol").stream().noneMatch(t -> pid.equals(t.get("processInstanceId"))),
+                "收回后 C 的沟通待办应被删除: " + dumpAllTasks());
+        assertTrue(tasks("dave").stream().noneMatch(t -> pid.equals(t.get("processInstanceId"))),
+                "收回后 D 的沟通待办应被删除: " + dumpAllTasks());
+        assertTrue(tasks("erin").stream().noneMatch(t -> pid.equals(t.get("processInstanceId"))),
+                "收回后 E 的沟通待办应被删除: " + dumpAllTasks());
+        // 下游清空后，B 自己那条仍在待反馈，且不再被阻塞
+        assertEquals("PENDING", commTaskOf(commTasksOf(managerTaskId), "alice").get("status"),
+                "B 自己那条不应被收回");
+        assertEquals(Boolean.TRUE, get("/api/comm/status/" + aliceCommTaskId, "alice").get("canReply"),
+                "下游全部收回后 B 应可提交反馈");
+
+        // 发起人 A 仍可一次性收回全部
+        Map<String, Object> withdrawAll = new HashMap<>();
+        withdrawAll.put("commTaskIds", new ArrayList<String>());
+        assertEquals("ok", post("/api/comm/withdraw/" + erinRecord.get("sessionId"), withdrawAll, "manager").get("result"),
+                "发起人全部收回失败");
+        assertEquals("NORMAL", get("/api/comm/status/" + managerTaskId, "manager").get("bizStatus"),
+                "全部收回后源待办应解锁");
+    }
+
+    /** 取某条沟通待办的同轮进度，转成 记录ID -> 当前用户能否收回 */
+    @SuppressWarnings("unchecked")
+    private Map<String, Boolean> sessionWithdrawFlags(String commTaskId, String user) {
+        Map<String, Object> detail = get("/api/wb/task/" + commTaskId, user);
+        List<Map<String, Object>> sessionTasks = (List<Map<String, Object>>) detail.get("sessionTasks");
+        Map<String, Boolean> flags = new HashMap<>();
+        for (Map<String, Object> t : sessionTasks) {
+            flags.put(String.valueOf(t.get("id")), Boolean.TRUE.equals(t.get("canWithdraw")));
+        }
+        return flags;
+    }
+
+    /** 以某人的身份把自己的沟通记录转交给 targets */
+    private Map<String, Object> forwardComm(String recordId, List<Map<String, String>> targets, String user) {
+        Map<String, Object> req = new HashMap<>();
+        req.put("commTaskRecordId", recordId);
+        req.put("content", "请协助核实");
+        req.put("targets", targets);
+        return post("/api/comm/forward", req, user);
+    }
+
+    /** 按流程实例找到某人的沟通待办（manager_review#COMM） */
+    private String commTaskIdOf(String user, String pid) {
+        String key = BizCommTask.buildCommTaskKey("manager_review");
+        return tasks(user).stream()
+                .filter(t -> key.equals(t.get("taskDefKey")))
+                .filter(t -> pid.equals(t.get("processInstanceId")))
+                .map(t -> (String) t.get("taskId"))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "未找到 " + user + " 的沟通待办: " + dumpAllTasks()));
+    }
+
     @Test
     @Order(1)
     void fullCommunicationFlow() {
@@ -503,9 +834,12 @@ class CommunicationFlowTest {
 
     /**
      * 认证上下文本身：未认证一律 401；不能操作他人待办；不能查他人待办列表。
+     *
+     * <p>必须排在最后（编号取 20）：本用例末尾会用错误密码验证 401，
+     * 底层 HttpClient 复用连接与认证缓存，会把之后的正常请求也打成 401。</p>
      */
     @Test
-    @Order(8)
+    @Order(20)
     void authenticationIsEnforcedOnEveryEndpoint() {
         // 准备一条 manager 的真实待办
         Map<String, Object> started = post("/api/comm/demo/start", null, "applicant6");

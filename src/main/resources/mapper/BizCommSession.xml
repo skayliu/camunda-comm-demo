@@ -49,4 +49,11 @@
         LIMIT 1
     </select>
 
+    <!-- 同一待办可能先后发起多次沟通（每次发起 = 一个新会话），审批界面需要全部会话 -->
+    <select id="selectByRootTask" parameterType="string" resultMap="bizCommSessionResultMap">
+        SELECT * FROM BIZ_COMM_SESSION_
+        WHERE ROOT_TASK_ID_ = #{rootTaskId, jdbcType=VARCHAR}
+        ORDER BY CREATE_TIME_ ASC, ID_ ASC
+    </select>
+
 </mapper>

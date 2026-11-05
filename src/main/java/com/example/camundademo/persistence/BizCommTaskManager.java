@@ -48,12 +48,34 @@ public class BizCommTaskManager extends AbstractManager implements Session {
         return selectList(MAPPER_NAMESPACE + ".selectTopLevelPendingBySession", sessionId);
     }
 
+    /** 按来源待办查询全部沟通记录（跨会话），审批界面还原多次沟通用 */
+    public List<BizCommTask> findByRootTaskId(String rootTaskId) {
+        return selectList(MAPPER_NAMESPACE + ".selectByRootTaskId", rootTaskId);
+    }
+
     public List<BizCommTask> findChildren(String parentCommTaskId) {
         return selectList(MAPPER_NAMESPACE + ".selectByParentId", parentCommTaskId);
     }
 
     public List<BizCommTask> findBySourceTaskId(String sourceTaskId) {
         return selectList(MAPPER_NAMESPACE + ".selectBySourceTaskId", sourceTaskId);
+    }
+
+    /**
+     * 按来源待办任务批量查询沟通记录。
+     * <p>跟踪图补全「已收回」记录时用：收回会删除引擎任务，ACT_HI_TASKINST 里连记录都没了，
+     * 只能回到业务表按来源任务反查。单条查询会退化成 N 次 SQL，这里走 IN 一次取完。</p>
+     */
+    public List<BizCommTask> findBySourceTaskIds(java.util.Collection<String> sourceTaskIds) {
+        if (sourceTaskIds == null || sourceTaskIds.isEmpty()) {
+            return new java.util.ArrayList<>();
+        }
+        // Camunda 的 DbSqlSession 直接把参数交给 MyBatis：单集合参数只暴露为 collection，
+        // 而 XML 里 foreach 用的是 list，会抛 Parameter 'list' not found。
+        // 这里显式包一层 Map，保证参数名与 SQL 一致。
+        Map<String, Object> params = new HashMap<>();
+        params.put("list", sourceTaskIds);
+        return selectList(MAPPER_NAMESPACE + ".selectBySourceTaskIds", params);
     }
 
     /** 按来源流程节点查询（报表用） */
@@ -70,7 +92,9 @@ public class BizCommTaskManager extends AbstractManager implements Session {
     }
 
     /**
-     * 按 Camunda 任务ID 查询沟通记录（DEPT_PROC_INST_ID_ 实际存放旁路任务ID）
+     * 按 Camunda 任务ID 查询沟通记录。
+     * 任务ID 存在 {@code CAMUNDA_TASK_ID_}；SQL 里对历史数据保留了
+     * {@code DEPT_PROC_INST_ID_} 的兼容匹配（该列现专用于部门沟通子流程实例ID）。
      */
     public BizCommTask findByCamundaTaskId(String camundaTaskId) {
         clearQueryCache();

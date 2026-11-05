@@ -35,6 +35,13 @@ public class WorkbenchService {
     /** 单页上限，避免前端传入过大 size 把引擎查爆 */
     private static final int MAX_PAGE_SIZE = 200;
 
+    /**
+     * Camunda 正常完成任务时，会把历史任务的 DELETE_REASON_ 写成 "completed"
+     * （见 TaskEntity.DELETE_REASON_COMPLETED），而不是留空。
+     * 对外必须归一化成“无删除原因”，否则“已完成”会被调用方当成“已收回/删除”。
+     */
+    private static final String CAMUNDA_DELETE_REASON_COMPLETED = "completed";
+
     @Autowired
     private TaskService taskService;
 
@@ -163,16 +170,23 @@ public class WorkbenchService {
                 vo.put("commRecordId", self.getId());
                 vo.put("sessionId", self.getSessionId());
                 List<BizCommTask> siblings = communicationService.getCommRecordsBySessionId(self.getSessionId());
+                // 每条记录分别标注“当前用户能否收回”：沟通对象把问题转给他人后，
+                // 下级不反馈时上级会被阻塞，需要能自己收回这段转交（与 withdrawCommunication 同口径）。
+                Map<String, Boolean> withdrawable =
+                        communicationService.withdrawableRecordMap(self.getSessionId(), userId);
                 List<Map<String, Object>> siblingsVO = new ArrayList<>();
                 for (BizCommTask s : siblings) {
                     Map<String, Object> sv = new LinkedHashMap<>();
                     sv.put("id", s.getId());
+                    // 父链是沟通反馈界面还原“转交/追问”层级的依据，必须一起返回
+                    sv.put("parentCommTaskId", s.getParentCommTaskId());
                     sv.put("targetId", s.getTargetId());
                     sv.put("targetName", s.getTargetName());
                     sv.put("status", s.getStatus());
                     sv.put("content", s.getContent());
                     sv.put("replyContent", s.getReplyContent());
                     sv.put("replyTime", s.getReplyTime());
+                    sv.put("canWithdraw", Boolean.TRUE.equals(withdrawable.get(s.getId())));
                     siblingsVO.add(sv);
                 }
                 vo.put("sessionTasks", siblingsVO);
@@ -282,8 +296,7 @@ public class WorkbenchService {
             vo.put("startTime", t.getStartTime());
             vo.put("endTime", t.getEndTime());
             vo.put("durationInMillis", t.getDurationInMillis());
-            vo.put("deleteReason", t.getDeleteReason());
-
+            vo.put("deleteReason", normalizeTaskDeleteReason(t.getDeleteReason()));
             Map<String, Object> vars = safeVariables(t.getProcessInstanceId());
             vo.put("applicant", vars.get("applicant"));
             vo.put("processTitle", vars.get("title") != null
@@ -291,7 +304,9 @@ public class WorkbenchService {
                     : (pd == null ? "审批流程" : pd.getName()));
             List<Map<String, Object>> comments = commentsOf(t.getId());
             vo.put("comments", comments);
-            vo.put("comment", comments.isEmpty() ? null : comments.get(0).get("fullMessage"));
+            // commentsOf 里统一的字段名是 message（见其实现），此处不能取 fullMessage，
+            // 否则即使意见已落库，列表/详情也永远显示为空
+            vo.put("comment", comments.isEmpty() ? null : comments.get(0).get("message"));
 
             if (!kw.isEmpty() && !matches(vo, kw)) {
                 continue;
@@ -383,6 +398,14 @@ public class WorkbenchService {
             // 流程已结束：运行期变量取不到，返回空即可，不阻断列表渲染
             return Collections.emptyMap();
         }
+    }
+
+    /**
+     * 历史任务的删除原因归一化：引擎用 "completed" 表示“正常办结”，
+     * 对外一律按“无删除原因”返回，前端/跟踪图才能把“完成”和“收回/删除”区分开。
+     */
+    private String normalizeTaskDeleteReason(String deleteReason) {
+        return CAMUNDA_DELETE_REASON_COMPLETED.equals(deleteReason) ? null : deleteReason;
     }
 
     private List<Map<String, Object>> commentsOf(String taskId) {

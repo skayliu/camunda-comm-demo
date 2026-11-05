@@ -18,6 +18,8 @@
         <result property="replyContent" column="REPLY_CONTENT_" jdbcType="CLOB"/>
         <result property="replyUserId" column="REPLY_USER_ID_" jdbcType="VARCHAR"/>
         <result property="replyTime" column="REPLY_TIME_" jdbcType="TIMESTAMP"/>
+        <result property="withdrawTime" column="WITHDRAW_TIME_" jdbcType="TIMESTAMP"/>
+        <result property="camundaTaskId" column="CAMUNDA_TASK_ID_" jdbcType="VARCHAR"/>
         <result property="deptProcInstId" column="DEPT_PROC_INST_ID_" jdbcType="VARCHAR"/>
         <result property="createTime" column="CREATE_TIME_" jdbcType="TIMESTAMP"/>
     </resultMap>
@@ -25,13 +27,15 @@
     <insert id="insertBizCommTask" parameterType="com.example.camundademo.entity.BizCommTask">
         INSERT INTO BIZ_COMM_TASK_ (ID_, SESSION_ID_, PARENT_COMM_TASK_ID_, SOURCE_TASK_ID_, ROOT_TASK_ID_,
             SOURCE_TASK_DEF_KEY_, TARGET_TYPE_, TARGET_ID_, TARGET_NAME_, CONTENT_, STATUS_, REPLY_CONTENT_,
-            REPLY_USER_ID_, REPLY_TIME_, DEPT_PROC_INST_ID_, CREATE_TIME_)
+            REPLY_USER_ID_, REPLY_TIME_, WITHDRAW_TIME_, CAMUNDA_TASK_ID_, DEPT_PROC_INST_ID_, CREATE_TIME_)
         VALUES (#{id, jdbcType=VARCHAR}, #{sessionId, jdbcType=VARCHAR}, #{parentCommTaskId, jdbcType=VARCHAR},
                 #{sourceTaskId, jdbcType=VARCHAR}, #{rootTaskId, jdbcType=VARCHAR},
                 #{sourceTaskDefKey, jdbcType=VARCHAR},
                 #{targetType, jdbcType=VARCHAR}, #{targetId, jdbcType=VARCHAR}, #{targetName, jdbcType=VARCHAR},
                 #{content, jdbcType=CLOB}, #{status, jdbcType=VARCHAR}, #{replyContent, jdbcType=CLOB},
                 #{replyUserId, jdbcType=VARCHAR}, #{replyTime, jdbcType=TIMESTAMP},
+                #{withdrawTime, jdbcType=TIMESTAMP},
+                #{camundaTaskId, jdbcType=VARCHAR},
                 #{deptProcInstId, jdbcType=VARCHAR}, #{createTime, jdbcType=TIMESTAMP})
     </insert>
 
@@ -40,7 +44,8 @@
         SET STATUS_ = #{status, jdbcType=VARCHAR},
             REPLY_CONTENT_ = #{replyContent, jdbcType=CLOB},
             REPLY_USER_ID_ = #{replyUserId, jdbcType=VARCHAR},
-            REPLY_TIME_ = #{replyTime, jdbcType=TIMESTAMP}
+            REPLY_TIME_ = #{replyTime, jdbcType=TIMESTAMP},
+            WITHDRAW_TIME_ = #{withdrawTime, jdbcType=TIMESTAMP}
         WHERE ID_ = #{id, jdbcType=VARCHAR}
     </update>
 
@@ -54,6 +59,12 @@
 
     <select id="selectBySessionId" parameterType="string" resultMap="bizCommTaskResultMap">
         SELECT * FROM BIZ_COMM_TASK_ WHERE SESSION_ID_ = #{sessionId, jdbcType=VARCHAR} ORDER BY CREATE_TIME_ ASC
+    </select>
+
+    <!-- 同一待办下全部沟通记录（跨会话），用于审批界面还原多次沟通 -->
+    <select id="selectByRootTaskId" parameterType="string" resultMap="bizCommTaskResultMap">
+        SELECT * FROM BIZ_COMM_TASK_ WHERE ROOT_TASK_ID_ = #{rootTaskId, jdbcType=VARCHAR}
+        ORDER BY CREATE_TIME_ ASC, ID_ ASC
     </select>
 
     <select id="selectPendingBySession" parameterType="string" resultMap="bizCommTaskResultMap">
@@ -78,6 +89,16 @@
         SELECT * FROM BIZ_COMM_TASK_ WHERE SOURCE_TASK_ID_ = #{sourceTaskId, jdbcType=VARCHAR}
     </select>
 
+    <!-- 按来源待办批量查（跟踪图补全已收回记录：这些记录在引擎历史里已被删除） -->
+    <select id="selectBySourceTaskIds" parameterType="list" resultMap="bizCommTaskResultMap">
+        SELECT * FROM BIZ_COMM_TASK_
+        WHERE SOURCE_TASK_ID_ IN
+        <foreach collection="list" item="sourceTaskId" open="(" separator="," close=")">
+            #{sourceTaskId, jdbcType=VARCHAR}
+        </foreach>
+        ORDER BY CREATE_TIME_ ASC, ID_ ASC
+    </select>
+
     <!-- 报表：按发起节点统计沟通量 -->
     <select id="selectBySourceTaskDefKey" parameterType="string" resultMap="bizCommTaskResultMap">
         SELECT * FROM BIZ_COMM_TASK_ WHERE SOURCE_TASK_DEF_KEY_ = #{sourceTaskDefKey, jdbcType=VARCHAR}
@@ -88,8 +109,14 @@
         SELECT COUNT(*) FROM BIZ_COMM_TASK_ WHERE SOURCE_TASK_DEF_KEY_ = #{sourceTaskDefKey, jdbcType=VARCHAR}
     </select>
 
+    <!-- 按旁路任务ID 反查沟通记录。
+         主走 CAMUNDA_TASK_ID_；同时保留 DEPT_PROC_INST_ID_ 兜底，
+         是为了兼容迁移前的老数据（那时任务ID 曾临时存在部门列里）。
+         新数据 deptProcInstId 恒为 null，这个 OR 分支不会命中，但能保证老库升级后收回/反馈不断链。 -->
     <select id="selectByCamundaTaskId" parameterType="string" resultMap="bizCommTaskResultMap">
-        SELECT * FROM BIZ_COMM_TASK_ WHERE DEPT_PROC_INST_ID_ = #{camundaTaskId, jdbcType=VARCHAR}
+        SELECT * FROM BIZ_COMM_TASK_
+        WHERE CAMUNDA_TASK_ID_ = #{camundaTaskId, jdbcType=VARCHAR}
+           OR DEPT_PROC_INST_ID_ = #{camundaTaskId, jdbcType=VARCHAR}
     </select>
 
     <select id="selectByTargetAndStatus" parameterType="map" resultMap="bizCommTaskResultMap">

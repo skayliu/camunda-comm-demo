@@ -29,7 +29,7 @@
         :loading="loading"
         row-key="taskId"
         :pagination="pagination"
-        :scroll="{ x: 820 }"
+        :scroll="{ x: 880 }"
         size="middle"
         @change="onTableChange"
       >
@@ -69,7 +69,10 @@
           </template>
 
           <template v-else-if="column.key === 'action'">
-            <a-button type="link" size="small" @click="openDetail(record)">详情</a-button>
+            <a-space :size="0">
+              <a-button type="link" size="small" @click="openDetail(record)">详情</a-button>
+              <a-button type="link" size="small" @click="openTrace(record)">跟踪</a-button>
+            </a-space>
           </template>
         </template>
 
@@ -129,6 +132,8 @@
         </div>
       </template>
     </a-drawer>
+
+    <ProcessTraceModal v-model:open="traceOpen" :process-instance-id="tracePid" />
   </div>
 </template>
 
@@ -138,6 +143,7 @@ import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import { ReloadOutlined } from '@ant-design/icons-vue'
 import { errorText, wbApi } from '../api'
+import ProcessTraceModal from '../components/ProcessTraceModal.vue'
 
 const loading = ref(false)
 const rows = ref([])
@@ -148,6 +154,8 @@ const total = ref(0)
 const detailOpen = ref(false)
 const current = ref(null)
 const isMobile = ref(window.innerWidth <= 768)
+const traceOpen = ref(false)
+const tracePid = ref('')
 
 const columns = [
   { title: '流程', key: 'title', width: 240 },
@@ -156,7 +164,7 @@ const columns = [
   { title: '处理时间', key: 'endTime', width: 150 },
   { title: '结果', key: 'result', width: 110 },
   { title: '审批意见', key: 'comment', width: 200, ellipsis: true },
-  { title: '操作', key: 'action', width: 80, fixed: 'right' }
+  { title: '操作', key: 'action', width: 130, fixed: 'right' }
 ]
 
 const pagination = computed(() => ({
@@ -218,6 +226,11 @@ function onTableChange(pag) {
 function openDetail(record) {
   current.value = record
   detailOpen.value = true
+}
+
+function openTrace(record) {
+  tracePid.value = record.processInstanceId
+  traceOpen.value = true
 }
 
 onMounted(load)

@@ -91,6 +91,10 @@ export const wbApi = {
   },
   taskDetail(taskId) {
     return http.get(`/wb/task/${taskId}`)
+  },
+  /** 流程跟踪：BPMN 节点几何 + 节点执行状态与明细 */
+  trace(processInstanceId) {
+    return http.get(`/wb/trace/${processInstanceId}`)
   }
 }
 
@@ -109,6 +113,10 @@ export const commApi = {
   },
   continueCommunication(payload) {
     return http.post('/comm/continue', payload)
+  },
+  /** 沟通待办里再次发起沟通：当前沟通对象转交他人补充核实 */
+  forward(payload) {
+    return http.post('/comm/forward', payload)
   },
   complete(taskId, comment) {
     return http.post(`/comm/demo/complete/${taskId}`, { comment })

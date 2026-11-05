@@ -255,7 +255,7 @@ class WorkbenchApiTest {
 
         Map<String, Object> applyNode = nodeById(traceNodes, "apply");
         assertNotNull(applyNode, "跟踪图中缺少 apply 节点");
-        assertEquals("填写申请", applyNode.get("name"));
+        assertEquals("发起", applyNode.get("name"));
         assertEquals("COMPLETED", applyNode.get("status"));
         assertEquals("userTask", applyNode.get("type"));
         assertEquals("用户任务", applyNode.get("typeLabel"));
@@ -276,6 +276,13 @@ class WorkbenchApiTest {
         assertEquals(1, nodeCommTasks.size(), "沟通任务应挂在来源节点 manager_review 上");
         assertEquals(false, nodeCommTasks.get(0).get("isFollowUp"));
         assertEquals("alice", nodeCommTasks.get(0).get("assignee"));
+        // 沟通明细：前端需要对象名称、沟通内容、发起时间与会话归属才能分组展示
+        assertEquals("manager", nodeCommTasks.get(0).get("initiator"), "沟通发起人应为源待办处理人");
+        assertEquals("alice", nodeCommTasks.get(0).get("targetName"));
+        assertEquals("USER", nodeCommTasks.get(0).get("targetType"));
+        assertEquals("请核实合同金额", nodeCommTasks.get(0).get("content"));
+        assertNotNull(nodeCommTasks.get(0).get("createTime"), "沟通明细应带发起时间");
+        assertNotNull(nodeCommTasks.get(0).get("rootTaskId"), "沟通明细应带会话 rootTaskId");
 
         Map<String, Object> financeNode = nodeById(traceNodes, "finance_review");
         assertNotNull(financeNode);
@@ -323,12 +330,21 @@ class WorkbenchApiTest {
                 (List<Map<String, Object>>) mgrAfterReply.get("commTasks");
         assertEquals(1, commTasksAfterReply.size(), "沟通记录不应从跟踪图消失");
         assertEquals("REPLIED", commTasksAfterReply.get(0).get("status"));
+        // 反馈后明细要带回复内容、反馈人与反馈时间，供展开区展示
+        assertEquals("金额无误", commTasksAfterReply.get(0).get("replyContent"));
+        assertEquals("alice", commTasksAfterReply.get(0).get("replyUserId"));
+        assertNotNull(commTasksAfterReply.get(0).get("replyTime"), "已反馈沟通应带回复时间");
 
         Map<String, Object> aliceDone = get("/api/wb/done?page=1&size=50", "alice");
         Map<String, Object> doneItem = findInPage(aliceDone, pid);
         assertNotNull(doneItem, "alice 已办中未找到沟通任务");
         assertEquals(true, doneItem.get("isCommTask"));
         assertEquals(false, doneItem.get("isFollowUp"), "已办中的首轮沟通不应被标记为追问");
+        // 反馈是"办结"而非"删除"：历史任务不应带 deleteReason（否则已办显示为已收回/删除）
+        assertEquals(null, doneItem.get("deleteReason"), "沟通反馈应办结任务，不应产生删除原因");
+        // 反馈内容必须落在审批意见（ACT_HI_COMMENT）上，且按当前 taskId 可回读，
+        // 这样已办列表、已办详情、流程图三处取自同一数据源，显示才一致
+        assertEquals("金额无误", doneItem.get("comment"), "反馈内容应写入审批意见");
 
         // 10.1 经理追问 alice：待办列表与沟通状态都要能直接区分“追问”
         Map<String, Object> followTarget = new HashMap<>();

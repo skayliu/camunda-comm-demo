@@ -7,12 +7,12 @@
                   id="Definitions_1"
                   targetNamespace="http://bpmn.io/schema/bpmn">
 
-    <bpmn:process id="approval" name="审批流程（带沟通）" isExecutable="true" camunda:historyTimeToLive="180">
-        <bpmn:startEvent id="start" name="发起申请">
+    <bpmn:process id="approval" name="沟通验证审批流程" isExecutable="true" camunda:historyTimeToLive="180">
+        <bpmn:startEvent id="start" name="开始">
             <bpmn:outgoing>flow1</bpmn:outgoing>
         </bpmn:startEvent>
 
-        <bpmn:userTask id="apply" name="填写申请" camunda:assignee="${applicant}">
+        <bpmn:userTask id="apply" name="发起" camunda:assignee="${applicant}">
             <bpmn:incoming>flow1</bpmn:incoming>
             <bpmn:outgoing>flow2</bpmn:outgoing>
         </bpmn:userTask>
@@ -27,7 +27,7 @@
             <bpmn:outgoing>flow4</bpmn:outgoing>
         </bpmn:userTask>
 
-        <bpmn:endEvent id="end" name="流程结束">
+        <bpmn:endEvent id="end" name="结束">
             <bpmn:incoming>flow4</bpmn:incoming>
         </bpmn:endEvent>
 

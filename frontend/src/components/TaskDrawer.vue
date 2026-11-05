@@ -57,10 +57,19 @@
           <div class="drawer-section">
             <div class="drawer-section-title">同轮反馈进度</div>
             <div
-              v-for="item in task.sessionTasks || []"
+              v-for="item in commPeerTree"
               :key="item.id"
               class="comm-target"
+              :class="{ 'is-follow': item.depth > 0 }"
+              :style="item.depth > 0 ? { marginLeft: `${18 + Math.min(item.depth - 1, 3) * 16}px` } : null"
             >
+              <div v-if="item.depth > 0" class="comm-follow-link">
+                <span class="comm-follow-arrow">↳</span>
+                <span v-if="item.parentName">
+                  转自 <b>{{ item.parentName }}</b> 的沟通
+                </span>
+                <span v-else>转自上一轮沟通</span>
+              </div>
               <div class="comm-target-head">
                 <div class="comm-target-name">
                   <a-avatar :size="24" style="background: #1677ff">
@@ -69,9 +78,21 @@
                   <span>{{ item.targetName || item.targetId }}</span>
                   <a-tag v-if="item.id === task.commRecordId" color="blue">我</a-tag>
                 </div>
-                <a-tag :color="statusColor(item.status)">
-                  {{ statusText(item.status) }}
-                </a-tag>
+                <a-space :size="6">
+                  <a-tag :color="statusColor(item.status)">
+                    {{ statusText(item.status) }}
+                  </a-tag>
+                  <!-- 上游沟通对象收回：一次取消自己下游的全部未反馈记录（含下级再转交的隔级对象） -->
+                  <a-popconfirm
+                    v-if="item.status === 'PENDING' && item.canWithdraw"
+                    title="收回该对象及其下游全部未反馈沟通？收回后对方待办将被删除"
+                    ok-text="收回"
+                    cancel-text="取消"
+                    @confirm="withdrawPeer(item)"
+                  >
+                    <a-button size="small" danger type="link">收回</a-button>
+                  </a-popconfirm>
+                </a-space>
               </div>
               <div class="muted" style="font-size: 12.5px">{{ item.content }}</div>
               <div v-if="item.replyContent" class="comm-reply">
@@ -85,10 +106,21 @@
 
           <div v-if="task.myCommStatus === 'PENDING'" class="drawer-section">
             <div class="drawer-section-title">我的反馈</div>
+            <a-alert
+              v-if="!canReply"
+              type="warning"
+              show-icon
+              style="margin-bottom: 10px"
+              message="暂时不能提交反馈"
+              :description="replyBlockedReason"
+            />
             <a-textarea
               v-model:value="replyContent"
               :rows="4"
-              placeholder="填写你的核实结果或意见，提交后本条沟通待办将完成"
+              :disabled="!canReply"
+              :placeholder="canReply
+                ? '填写你的核实结果或意见，提交后本条沟通待办将完成'
+                : '还有未反馈的沟通，需等对方反馈或由发起人/上游沟通对象收回后才能提交'"
               :maxlength="500"
               show-count
             />
@@ -121,71 +153,104 @@
             />
           </div>
 
-          <div v-if="commTasks.length" class="drawer-section">
+          <div v-if="commSessions.length" class="drawer-section">
             <div class="drawer-section-title">
               沟通记录
-              <a-tag v-if="comm.sessionActive" color="processing" style="margin-left: 4px">
-                进行中 · 第 {{ comm.currentRound }} 轮
-              </a-tag>
-              <a-tag v-else-if="comm.sessionId" color="default" style="margin-left: 4px">
-                已结束
-              </a-tag>
-            </div>
-            <div class="comm-bubble" style="margin-bottom: 12px">
-              <div style="margin-bottom: 8px; color: rgba(0, 0, 0, 0.45); font-size: 12px">
-                {{ comm.initiator }} 发起 · {{ fmt(comm.createTime) }}
-              </div>
-              {{ comm.initialContent }}
+              <span class="comm-session-count">共 {{ commSessions.length }} 次沟通</span>
             </div>
 
-            <div v-for="item in commTasks" :key="item.id" class="comm-target">
-              <div class="comm-target-head">
-                <div class="comm-target-name">
-                  <a-avatar :size="24" style="background: #722ed1">
-                    {{ (item.targetName || item.targetId || '?').slice(0, 1) }}
-                  </a-avatar>
-                  <span>{{ item.targetName || item.targetId }}</span>
-                  <span class="mono muted">{{ item.targetId }}</span>
-                </div>
-                <a-space :size="6">
-                  <a-tag :color="statusColor(item.status)">
-                    {{ statusText(item.status) }}
-                  </a-tag>
-                  <a-popconfirm
-                    v-if="item.status === 'PENDING' && comm.canWithdraw"
-                    title="收回给该对象的沟通？"
-                    ok-text="收回"
-                    cancel-text="取消"
-                    @confirm="withdrawOne(item)"
-                  >
-                    <a-button size="small" danger type="link">收回</a-button>
-                  </a-popconfirm>
-                  <a-button
-                    v-if="item.status === 'REPLIED'"
-                    size="small"
-                    type="link"
-                    @click="openContinue(item)"
-                  >
-                    追问
-                  </a-button>
-                </a-space>
+            <div
+              v-for="s in commSessions"
+              :key="s.sessionId || s.seq"
+              class="comm-session"
+              :class="{ 'is-active': s.active }"
+            >
+              <div class="comm-session-head">
+                <span class="comm-session-index">第 {{ s.seq }} 次沟通</span>
+                <a-tag v-if="s.active" color="processing" style="margin-inline-end: 0">
+                  进行中 · 第 {{ s.currentRound }} 轮
+                </a-tag>
+                <a-tag v-else color="default" style="margin-inline-end: 0">已结束</a-tag>
+                <span class="comm-session-time">
+                  {{ s.initiator || '发起人' }} 发起 · {{ fmt(s.createTime) }}
+                </span>
               </div>
-              <div class="muted" style="font-size: 12.5px">{{ item.content }}</div>
+              <div class="comm-bubble" style="margin-bottom: 12px">
+                {{ s.initialContent }}
+              </div>
+
               <div
-                v-if="item.replyContent"
-                class="comm-reply"
-                :class="{ pending: false }"
+                v-for="item in s.tree"
+                :key="item.id"
+                class="comm-target"
+                :class="{ 'is-follow': item.depth > 0 || item.isFollowUp }"
+                :style="item.depth > 0 ? { marginLeft: `${18 + Math.min(item.depth - 1, 3) * 16}px` } : null"
               >
-                {{ item.replyContent }}
-                <div style="margin-top: 4px; color: #7a9c85; font-size: 11px">
-                  {{ item.replyUserId }} · {{ fmt(item.replyTime) }}
+                <div v-if="item.depth > 0 || item.isFollowUp" class="comm-follow-link">
+                  <span class="comm-follow-arrow">↳</span>
+                  <span v-if="item.parentName">
+                    追问自
+                    <b>{{ item.parentName }}</b>
+                    的反馈 · 第 {{ item.depth + 1 }} 轮
+                  </span>
+                  <span v-else>追问 · 承接上一轮沟通</span>
+                  <span v-if="item.parentContent" class="comm-follow-quote">
+                    “{{ item.parentContent }}”
+                  </span>
+                </div>
+                <div class="comm-target-head">
+                  <div class="comm-target-name">
+                    <a-avatar :size="24" style="background: #722ed1">
+                      {{ (item.targetName || item.targetId || '?').slice(0, 1) }}
+                    </a-avatar>
+                    <span>{{ item.targetName || item.targetId }}</span>
+                    <span class="mono muted">{{ item.targetId }}</span>
+                    <a-tag v-if="item.depth > 0 || item.isFollowUp" color="gold" style="margin-inline-end: 0">追问</a-tag>
+                  </div>
+                  <a-space :size="6">
+                    <a-tag :color="statusColor(item.status)">
+                      {{ statusText(item.status) }}
+                    </a-tag>
+                    <a-popconfirm
+                      v-if="item.status === 'PENDING' && (item.canWithdrawOne || comm.canWithdraw)"
+                      title="收回该沟通及其下游未反馈对象？"
+                      ok-text="收回"
+                      cancel-text="取消"
+                      @confirm="withdrawOne(item)"
+                    >
+                      <a-button size="small" danger type="link">收回</a-button>
+                    </a-popconfirm>
+                    <a-button
+                      v-if="item.status === 'REPLIED'"
+                      size="small"
+                      type="link"
+                      @click="openContinue(item)"
+                    >
+                      追问
+                    </a-button>
+                  </a-space>
+                </div>
+                <div class="muted" style="font-size: 12.5px">{{ item.content }}</div>
+                <div
+                  v-if="item.replyContent"
+                  class="comm-reply"
+                  :class="{ pending: false }"
+                >
+                  {{ item.replyContent }}
+                  <div style="margin-top: 4px; color: #7a9c85; font-size: 11px">
+                    {{ item.replyUserId }} · {{ fmt(item.replyTime) }}
+                  </div>
+                </div>
+                <div v-else-if="item.status === 'PENDING'" class="comm-reply pending">
+                  等待 {{ item.targetName || item.targetId }} 反馈
+                </div>
+                <div v-else-if="item.status === 'WITHDRAWN'" class="comm-reply withdrawn">
+                  已收回<span v-if="item.withdrawTime"> · {{ fmt(item.withdrawTime) }}</span>
                 </div>
               </div>
-              <div v-else-if="item.status === 'PENDING'" class="comm-reply pending">
-                等待 {{ item.targetName || item.targetId }} 反馈
-              </div>
-              <div v-else-if="item.status === 'WITHDRAWN'" class="comm-reply withdrawn">
-                已收回
+
+              <div v-if="!s.tree.length" class="muted" style="font-size: 12px">
+                本次沟通没有沟通对象记录
               </div>
             </div>
           </div>
@@ -210,13 +275,22 @@
 
         <template v-if="task.isCommTask">
           <a-button
-            type="primary"
-            :loading="submitting"
-            :disabled="task.myCommStatus !== 'PENDING'"
-            @click="submitReply"
+            v-if="task.myCommStatus === 'PENDING' && canForward"
+            :loading="commSubmitting"
+            @click="openForward"
           >
-            提交反馈
+            发起沟通
           </a-button>
+          <a-tooltip :title="replyBlockedReason || ''">
+            <a-button
+              type="primary"
+              :loading="submitting"
+              :disabled="task.myCommStatus !== 'PENDING' || !canReply"
+              @click="submitReply"
+            >
+              提交反馈
+            </a-button>
+          </a-tooltip>
         </template>
 
         <template v-else>
@@ -262,12 +336,28 @@
       @ok="submitComm"
     >
       <a-form layout="vertical" style="margin-top: 8px">
+        <a-alert
+          v-if="commModal.mode === 'start' && commModal.appendMode"
+          type="info"
+          show-icon
+          style="margin-bottom: 12px"
+          message="本次沟通仍在进行中"
+          description="已预选当前沟通对象，只需补上遗漏的人员；已在沟通中的人员会自动跳过。"
+        />
+        <a-alert
+          v-if="commModal.mode === 'forward'"
+          type="info"
+          show-icon
+          style="margin-bottom: 12px"
+          message="转交他人补充核实"
+          description="新沟通会挂在这条沟通记录下，审批人可在追问链中看到转交关系。不能转回给发起人或上游沟通对象；你仍可继续填写自己的反馈。"
+        />
         <a-form-item label="沟通对象" required>
           <a-select
             v-model:value="commForm.targets"
             mode="multiple"
             placeholder="选择需要反馈的人员"
-            :options="targetOptions"
+            :options="commModal.mode === 'forward' ? forwardOptions : targetOptions"
             :filter-option="filterOption"
             :max-tag-count="4"
           />
@@ -307,14 +397,121 @@ const replyContent = ref('')
 const isMobile = ref(window.innerWidth <= 768)
 
 const comm = ref({})
+// 沟通待办自身状态：taskDetail 里 commStatus 指向“源待办”，
+// 按钮权限需要看这条沟通记录自己的状态（canForwardComm 按当前沟通对象计算）
+const commSelf = ref({})
+const canForward = computed(() => !!commSelf.value.canForwardComm)
+// 提交反馈完成的前置条件（后端 canReply 与 replyCommTask 的校验同源）：
+// 自己是这条沟通的接收人、仍待反馈，且没有仍未反馈的下游沟通。
+const canReply = computed(() => commSelf.value.canReply !== false)
+const replyBlockedReason = computed(() => {
+  if (task.value.myCommStatus !== 'PENDING' || canReply.value) return ''
+  const who = commSelf.value.replyBlockedBy
+  return who
+    ? `还有未反馈的沟通：${who}。需等对方反馈，或由发起人/上游沟通对象收回后才能提交本条反馈。`
+    : '还有未反馈的沟通，需等对方反馈，或由发起人/上游沟通对象收回后才能提交本条反馈。'
+})
 const commTasks = computed(() =>
   Array.isArray(comm.value.commTasks) ? comm.value.commTasks : []
 )
 
+// 追问关系：按 parentCommTaskId 把记录还原成「首轮沟通 → 追问 → 再追问」的树，
+// 再按时间顺序展开成带层级的扁平列表，供模板缩进渲染（与流程跟踪页保持一致）
+function buildCommTree(source) {
+  const list = (source || [])
+    .slice()
+    .sort((a, b) => new Date(a.createTime || 0) - new Date(b.createTime || 0))
+  const byId = new Map(list.map((t) => [t.id, t]))
+  const children = new Map()
+  const roots = []
+  // 有 parentCommTaskId 但父记录不在本次返回里的追问：
+  // 不能当成首轮沟通（会丢掉追问关系），用后端带回的父级快照单独保留层级。
+  const orphans = []
+  list.forEach((task) => {
+    const parent = task.parentCommTaskId ? byId.get(task.parentCommTaskId) : null
+    if (!parent) {
+      if (task.parentCommTaskId) orphans.push(task)
+      else roots.push(task)
+      return
+    }
+    if (!children.has(parent.id)) children.set(parent.id, [])
+    children.get(parent.id).push(task)
+  })
+
+  const rows = []
+  const walk = (task, depth, parent) => {
+    rows.push({
+      ...task,
+      depth,
+      parentName: parent ? parent.targetName || parent.targetId || '' : '',
+      parentContent: parent ? parent.content || '' : ''
+    })
+    ;(children.get(task.id) || []).forEach((child) => walk(child, depth + 1, task))
+  }
+  roots.forEach((root) => walk(root, 0, null))
+  orphans.forEach((task) => {
+    rows.push({
+      ...task,
+      depth: 1,
+      parentName: task.parentTargetName || '',
+      parentContent: task.parentContent || ''
+    })
+    ;(children.get(task.id) || []).forEach((child) => walk(child, 2, task))
+  })
+  return rows
+}
+
+// 同一待办可以多次发起沟通，每次发起都是一个独立会话。
+// 后端 sessions 返回全部会话（按发起时间升序），这里逐会话建树后分组渲染；
+// 旧接口只回单会话时降级成一组，保证兼容。
+const commSessions = computed(() => {
+  const sessions = Array.isArray(comm.value.sessions) ? comm.value.sessions : []
+  if (sessions.length) {
+    return sessions.map((s, index) => ({
+      sessionId: s.sessionId,
+      seq: s.seq || index + 1,
+      active: !!s.active,
+      status: s.status,
+      initiator: s.initiator,
+      initialContent: s.initialContent,
+      currentRound: s.currentRound || 1,
+      createTime: s.createTime,
+      tree: buildCommTree(s.commTasks || [])
+    }))
+  }
+  if (!commTasks.value.length) return []
+  return [
+    {
+      sessionId: comm.value.sessionId,
+      seq: 1,
+      active: !!comm.value.sessionActive,
+      status: comm.value.sessionStatus,
+      initiator: comm.value.initiator,
+      initialContent: comm.value.initialContent,
+      currentRound: comm.value.currentRound || 1,
+      createTime: comm.value.createTime,
+      tree: buildCommTree(commTasks.value)
+    }
+  ]
+})
+
+// 追平层：所有会话的记录合集（保留给需要平铺判断的场景）
+const commTree = computed(() => commSessions.value.flatMap((s) => s.tree))
+
+// 沟通反馈界面：同一会话内的记录也按父链展开，转交/追问关系才看得出来
+const commPeerTree = computed(() => buildCommTree(task.value.sessionTasks || []))
+
+// 待反馈对象只统计进行中的会话，历史会话的残留状态不参与锁定判断
+const pendingCommTargets = computed(() => {
+  const active = commSessions.value.find((s) => s.active)
+  const list = active ? active.tree : commTree.value
+  return list.filter((t) => t.status === 'PENDING')
+})
+
 const isLocked = computed(() => comm.value.bizStatus === 'COMMUNICATING')
 const canInitiate = computed(() => !!comm.value.canInitiate)
 const lockDescription = computed(() => {
-  const pending = commTasks.value.filter((t) => t.status === 'PENDING')
+  const pending = pendingCommTargets.value
   if (!pending.length) {
     return '沟通状态正在刷新，请稍后再试。'
   }
@@ -324,7 +521,7 @@ const lockDescription = computed(() => {
 })
 
 // 发起 / 追问
-const commModal = reactive({ open: false, mode: 'start', parentId: null, title: '' })
+const commModal = reactive({ open: false, mode: 'start', parentId: null, title: '', appendMode: false })
 const commForm = reactive({ targets: [], content: '' })
 const commSubmitting = ref(false)
 const targetOptions = ref([])
@@ -333,6 +530,27 @@ const targetNames = ref({})
 function filterOption(input, option) {
   return (option.label || '').toLowerCase().includes(input.toLowerCase())
 }
+
+// 转交时不可选的人：自己、本次沟通发起人、以及上游沟通对象（父/祖父……）。
+// 后端 forwardCommunication 会做同样的拒绝，这里只是不让用户白选一遍。
+const forwardOptions = computed(() => {
+  const excluded = new Set()
+  const list = Array.isArray(task.value.sessionTasks) ? task.value.sessionTasks : []
+  const byId = new Map(list.map((t) => [t.id, t]))
+  const self = byId.get(task.value.commRecordId)
+  if (self && self.targetId) excluded.add(self.targetId)
+  let cur = self
+  const guard = new Set()
+  while (cur && cur.parentCommTaskId && !guard.has(cur.id)) {
+    guard.add(cur.id)
+    const parent = byId.get(cur.parentCommTaskId)
+    if (!parent) break
+    if (parent.targetId) excluded.add(parent.targetId)
+    cur = parent
+  }
+  if (comm.value.initiator) excluded.add(comm.value.initiator)
+  return targetOptions.value.filter((o) => !excluded.has(o.value))
+})
 
 function fmt(value) {
   if (!value) return '-'
@@ -364,6 +582,7 @@ async function load() {
     const data = await wbApi.taskDetail(props.taskId)
     task.value = data
     comm.value = data.commStatus || {}
+    commSelf.value = data.commStatusOfSelf || {}
     replyContent.value = ''
     approveComment.value = ''
     loaded.value = true
@@ -390,11 +609,19 @@ async function ensureTargets() {
 
 async function openStart() {
   await ensureTargets()
+  // 已有进行中的沟通时，本次提交是“补充对象”：预选当前沟通对象，
+  // 用户只需补上漏掉的人，后端会自动跳过已在沟通中的人员。
+  const activeSession = (comm.value.sessions || []).find((s) => s.active)
   commModal.mode = 'start'
   commModal.parentId = null
-  commModal.title = '发起沟通'
-  commForm.targets = []
-  commForm.content = ''
+  commModal.appendMode = !!activeSession
+  commModal.title = activeSession ? '发起沟通（补充沟通对象）' : '发起沟通'
+  commForm.targets = activeSession
+    ? [...new Set((activeSession.commTasks || [])
+        .filter((t) => t.status !== 'WITHDRAWN')
+        .map((t) => t.targetId))]
+    : []
+  commForm.content = activeSession ? (activeSession.initialContent || '') : ''
   commModal.open = true
 }
 
@@ -404,6 +631,18 @@ async function openContinue(item) {
   commModal.parentId = item.id
   commModal.title = `追问：${item.targetName || item.targetId}`
   commForm.targets = [item.targetId]
+  commForm.content = ''
+  commModal.open = true
+}
+
+// 沟通反馈界面：以当前沟通记录为父，把问题转给其他人补充核实
+async function openForward() {
+  await ensureTargets()
+  commModal.mode = 'forward'
+  commModal.parentId = task.value.commRecordId
+  commModal.appendMode = false
+  commModal.title = '发起沟通（转交他人）'
+  commForm.targets = []
   commForm.content = ''
   commModal.open = true
 }
@@ -428,19 +667,49 @@ async function submitComm() {
   commSubmitting.value = true
   try {
     if (commModal.mode === 'start') {
-      await commApi.start({
+      const res = await commApi.start({
         taskId: props.taskId,
         content: commForm.content.trim(),
         targets: buildTargets()
       })
-    } else {
-      await commApi.continueCommunication({
+      // 业务异常走的是 HTTP 200 + {error:true}，不判这里会把失败提示成“成功”
+      if (res && res.error) {
+        message.warning(res.message || '无法发起沟通')
+        return
+      }
+      const added = (res && res.addedTargets) || []
+      const skipped = (res && res.skippedTargets) || []
+      if (res && res.appended) {
+        message.success(`已补充沟通对象：${added.join('、')}`
+          + (skipped.length ? `（${skipped.join('、')} 已在本次沟通中，已跳过）` : ''))
+      } else {
+        message.success(added.length ? `沟通已发起：${added.join('、')}` : '沟通已发起')
+      }
+    } else if (commModal.mode === 'continue') {
+      const res = await commApi.continueCommunication({
         parentCommTaskRecordId: commModal.parentId,
         content: commForm.content.trim(),
         targets: buildTargets()
       })
+      if (res && res.error) {
+        message.warning(res.message || '无法发送追问')
+        return
+      }
+      message.success('追问已发送')
+    } else {
+      // forward：沟通对象本人把这条沟通转给他人，同一会话内形成子记录
+      const res = await commApi.forward({
+        commTaskRecordId: commModal.parentId,
+        content: commForm.content.trim(),
+        targets: buildTargets()
+      })
+      if (res && res.error) {
+        message.warning(res.message || '无法发起沟通')
+        return
+      }
+      const added = (res && res.addedTargets) || []
+      message.success(added.length ? `已发起沟通：${added.join('、')}` : '沟通已发起')
     }
-    message.success(commModal.mode === 'start' ? '沟通已发起' : '追问已发送')
     commModal.open = false
     await load()
     emit('refresh')
@@ -451,10 +720,35 @@ async function submitComm() {
   }
 }
 
+async function withdrawPeer(item) {
+  try {
+    // 同轮反馈进度里的记录都来自当前沟通待办所属会话。
+    // 后端对“上游收回”的口径是：收回自己下游的全部未反馈记录（含更下级转交），
+    // 因此这里传一条 id 即可，返回体里的 withdrawn 是实际收回条数。
+    const res = await commApi.withdraw(task.value.sessionId, [item.id])
+    if (res && res.error) {
+      message.warning(res.message || '收回失败')
+      return
+    }
+    const n = res && typeof res.withdrawn === 'number' ? res.withdrawn : 0
+    message.success(n > 1 ? `已收回 ${n} 条下游沟通` : '已收回')
+    await load()
+    emit('refresh')
+  } catch (e) {
+    message.error(errorText(e))
+  }
+}
+
 async function withdrawOne(item) {
   try {
-    await commApi.withdraw(comm.value.sessionId, [item.id])
-    message.success('已收回')
+    // 记录可能属于历史会话，收回必须带上它自己的 sessionId
+    const res = await commApi.withdraw(item.sessionId || comm.value.sessionId, [item.id])
+    if (res && res.error) {
+      message.warning(res.message || '收回失败')
+      return
+    }
+    const n = res && typeof res.withdrawn === 'number' ? res.withdrawn : 0
+    message.success(n > 1 ? `已收回 ${n} 条下游沟通` : '已收回')
     await load()
     emit('refresh')
   } catch (e) {
@@ -464,7 +758,11 @@ async function withdrawOne(item) {
 
 async function withdrawAll() {
   try {
-    await commApi.withdraw(comm.value.sessionId, [])
+    const res = await commApi.withdraw(comm.value.sessionId, [])
+    if (res && res.error) {
+      message.warning(res.message || '收回失败')
+      return
+    }
     message.success('已全部收回')
     await load()
     emit('refresh')
@@ -474,16 +772,26 @@ async function withdrawAll() {
 }
 
 async function submitReply() {
+  if (!canReply.value) {
+    message.warning(replyBlockedReason.value || '暂时不能提交反馈')
+    return
+  }
   if (!replyContent.value.trim()) {
     message.warning('请填写反馈内容')
     return
   }
   submitting.value = true
   try {
-    await commApi.reply({
+    const res = await commApi.reply({
       commTaskRecordId: task.value.commRecordId,
       content: replyContent.value.trim()
     })
+    // 业务异常是 HTTP 200 + {error:true}，不判会把它显示成“反馈已提交”
+    if (res && res.error) {
+      message.warning(res.message || '无法提交反馈')
+      await load()
+      return
+    }
     message.success('反馈已提交')
     close()
     emit('refresh')

@@ -35,7 +35,7 @@
         :loading="loading"
         row-key="processInstanceId"
         :pagination="pagination"
-        :scroll="{ x: 820 }"
+        :scroll="{ x: 880 }"
         size="middle"
         @change="onTableChange"
       >
@@ -82,7 +82,10 @@
           </template>
 
           <template v-else-if="column.key === 'action'">
-            <a-button type="link" size="small" @click="openDetail(record)">详情</a-button>
+            <a-space :size="0">
+              <a-button type="link" size="small" @click="openDetail(record)">详情</a-button>
+              <a-button type="link" size="small" @click="openTrace(record)">跟踪</a-button>
+            </a-space>
           </template>
         </template>
 
@@ -141,6 +144,8 @@
         </div>
       </template>
     </a-drawer>
+
+    <ProcessTraceModal v-model:open="traceOpen" :process-instance-id="tracePid" />
   </div>
 </template>
 
@@ -152,6 +157,7 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons-vue'
 import { commApi, errorText, wbApi } from '../api'
+import ProcessTraceModal from '../components/ProcessTraceModal.vue'
 
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
@@ -166,6 +172,8 @@ const total = ref(0)
 const detailOpen = ref(false)
 const current = ref(null)
 const isMobile = ref(window.innerWidth <= 768)
+const traceOpen = ref(false)
+const tracePid = ref('')
 
 const columns = [
   { title: '流程', key: 'title', width: 240 },
@@ -173,7 +181,7 @@ const columns = [
   { title: '当前节点', key: 'current', width: 200 },
   { title: '发起时间', key: 'startTime', width: 150 },
   { title: '结束时间', key: 'endTime', width: 140 },
-  { title: '操作', key: 'action', width: 80, fixed: 'right' }
+  { title: '操作', key: 'action', width: 130, fixed: 'right' }
 ]
 
 const pagination = computed(() => ({
@@ -229,6 +237,11 @@ function onTableChange(pag) {
 function openDetail(record) {
   current.value = record
   detailOpen.value = true
+}
+
+function openTrace(record) {
+  tracePid.value = record.processInstanceId
+  traceOpen.value = true
 }
 
 async function createProcess() {

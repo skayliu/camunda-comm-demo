@@ -131,7 +131,10 @@ public class CommunicationController {
         Object comment = req == null ? null : req.get("comment");
         try {
             if (comment != null && !String.valueOf(comment).isBlank()) {
-                taskService.createComment(taskId, currentUser, String.valueOf(comment));
+                // createComment 的第二个参数是流程实例ID（不是 userId）。
+                // 传 currentUser 会把意见挂到一个不存在的流程实例上，
+                // 已办详情与流程图按 procInstId 关联时就会查不到这条意见。
+                taskService.createComment(taskId, task.getProcessInstanceId(), String.valueOf(comment));
             }
             taskService.complete(taskId);
             return Collections.singletonMap("result", "ok");
@@ -177,7 +180,12 @@ public class CommunicationController {
 
     // ===== 沟通核心接口 =====
 
-    /** 发起沟通：发起人取当前登录用户 */
+    /**
+     * 发起沟通：发起人取当前登录用户。
+     *
+     * <p>该待办已有进行中的沟通时，本次提交按“补充沟通对象”处理（只给新增人员建沟通任务），
+     * 返回 `appended=true` 与 `addedTargets / skippedTargets` 供前端给出准确提示。</p>
+     */
     @PostMapping("/start")
     public Map<String, Object> start(@RequestBody Map<String, Object> req, Authentication authentication) {
         String initiator = CurrentUser.require(authentication);
@@ -185,8 +193,7 @@ public class CommunicationController {
         String content = (String) req.get("content");
         @SuppressWarnings("unchecked")
         List<Map<String, String>> targets = (List<Map<String, String>>) req.get("targets");
-        String sessionId = communicationService.startCommunication(taskId, initiator, content, targets);
-        return Collections.singletonMap("sessionId", sessionId);
+        return communicationService.startCommunicationDetailed(taskId, initiator, content, targets);
     }
 
     /** 查询待办沟通状态：按当前登录用户计算 canInitiate / canWithdraw */
@@ -196,7 +203,12 @@ public class CommunicationController {
         return communicationService.getTaskCommStatus(taskId, currentUser);
     }
 
-    /** 收回沟通（commTaskIds为空=全部收回）：操作人取当前登录用户 */
+    /**
+     * 收回沟通（commTaskIds 为空 = 全部收回，仅发起人）：操作人取当前登录用户。
+     *
+     * <p>上游沟通对象收回时，收回范围是自己在本次沟通中的全部下游未反馈记录，
+     * 返回体里的 {@code withdrawn} 即实际收回条数，前端据此提示“已收回 N 条”。</p>
+     */
     @PostMapping("/withdraw/{sessionId}")
     public Map<String, Object> withdraw(@PathVariable String sessionId,
                                         @RequestBody(required = false) Map<String, Object> req,
@@ -204,8 +216,11 @@ public class CommunicationController {
         String operator = CurrentUser.require(authentication);
         @SuppressWarnings("unchecked")
         List<String> commTaskIds = req == null ? null : (List<String>) req.get("commTaskIds");
-        communicationService.withdrawCommunication(sessionId, operator, commTaskIds);
-        return Collections.singletonMap("result", "ok");
+        int withdrawn = communicationService.withdrawCommunication(sessionId, operator, commTaskIds);
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("result", "ok");
+        resp.put("withdrawn", withdrawn);
+        return resp;
     }
 
     /** 反馈沟通意见：反馈人取当前登录用户 */
@@ -228,6 +243,20 @@ public class CommunicationController {
         List<Map<String, String>> targets = (List<Map<String, String>>) req.get("targets");
         communicationService.continueCommunication(parentCommTaskId, userId, content, targets);
         return Collections.singletonMap("result", "ok");
+    }
+
+    /**
+     * 沟通待办里再次发起沟通：由当前沟通对象把问题转给其他人补充核实。
+     * 转交人取当前登录用户，父记录为请求中的 commTaskRecordId。
+     */
+    @PostMapping("/forward")
+    public Map<String, Object> forward(@RequestBody Map<String, Object> req, Authentication authentication) {
+        String operator = CurrentUser.require(authentication);
+        String commRecordId = (String) req.get("commTaskRecordId");
+        String content = (String) req.get("content");
+        @SuppressWarnings("unchecked")
+        List<Map<String, String>> targets = (List<Map<String, String>>) req.get("targets");
+        return communicationService.forwardCommunication(commRecordId, operator, content, targets);
     }
 
     // ===== 异常处理 =====

@@ -86,6 +86,22 @@ public class BizCommTask implements DbEntity, Serializable {
     protected String replyContent;
     protected String replyUserId;
     protected Date replyTime;
+    /**
+     * 收回时间。收回走的是「改状态 + 删除引擎任务」，引擎侧不留任何痕迹，
+     * 只能自己落库，否则跟踪图里的已收回记录无法说明是什么时候收回的。
+     */
+    protected Date withdrawTime;
+    /**
+     * 沟通旁路任务对应的 Camunda 任务 ID（newTask 创建出的 standalone 任务）。
+     * 收回时 deleteTask、反馈时 complete、待办中心反查记录，全部靠它定位。
+     * 创建后不再变化，因此不参与 update 的 SET 列表。
+     */
+    protected String camundaTaskId;
+    /**
+     * 部门沟通过程中启动的子流程实例 ID。
+     * <b>预留给「部门沟通子流程」，当前恒为 null</b>：早期曾把旁路任务 ID 塞进这里临时存放，
+     * 已迁移到 {@link #camundaTaskId}。做成部门子流程时直接写这里，两个含义不再互相打架。
+     */
     protected String deptProcInstId;
     protected Date createTime;
 
@@ -96,6 +112,7 @@ public class BizCommTask implements DbEntity, Serializable {
         state.put("replyContent", replyContent);
         state.put("replyUserId", replyUserId);
         state.put("replyTime", replyTime);
+        state.put("withdrawTime", withdrawTime);
         return state;
     }
 
@@ -127,6 +144,10 @@ public class BizCommTask implements DbEntity, Serializable {
     public void setReplyUserId(String replyUserId) { this.replyUserId = replyUserId; }
     public Date getReplyTime() { return replyTime; }
     public void setReplyTime(Date replyTime) { this.replyTime = replyTime; }
+    public Date getWithdrawTime() { return withdrawTime; }
+    public void setWithdrawTime(Date withdrawTime) { this.withdrawTime = withdrawTime; }
+    public String getCamundaTaskId() { return camundaTaskId; }
+    public void setCamundaTaskId(String camundaTaskId) { this.camundaTaskId = camundaTaskId; }
     public String getDeptProcInstId() { return deptProcInstId; }
     public void setDeptProcInstId(String deptProcInstId) { this.deptProcInstId = deptProcInstId; }
     public Date getCreateTime() { return createTime; }

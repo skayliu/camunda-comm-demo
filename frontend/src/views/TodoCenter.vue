@@ -74,7 +74,7 @@
         :loading="loading"
         row-key="taskId"
         :pagination="pagination"
-        :scroll="{ x: 760 }"
+        :scroll="{ x: 820 }"
         size="middle"
         @change="onTableChange"
       >
@@ -120,9 +120,12 @@
           </template>
 
           <template v-else-if="column.key === 'action'">
-            <a-button type="link" size="small" @click="openTask(record)">
-              {{ record.isCommTask ? '去反馈' : '去处理' }}
-            </a-button>
+            <a-space :size="0">
+              <a-button type="link" size="small" @click="openTask(record)">
+                {{ record.isCommTask ? '去反馈' : '去处理' }}
+              </a-button>
+              <a-button type="link" size="small" @click="openTrace(record)">跟踪</a-button>
+            </a-space>
           </template>
         </template>
 
@@ -139,6 +142,8 @@
       :task-id="currentTaskId"
       @refresh="load"
     />
+
+    <ProcessTraceModal v-model:open="traceOpen" :process-instance-id="tracePid" />
   </div>
 </template>
 
@@ -158,6 +163,7 @@ import {
 } from '@ant-design/icons-vue'
 import { commApi, errorText, wbApi } from '../api'
 import TaskDrawer from '../components/TaskDrawer.vue'
+import ProcessTraceModal from '../components/ProcessTraceModal.vue'
 
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
@@ -177,6 +183,9 @@ const stats = reactive({ total: 0, approval: 0, comm: 0, followup: 0, today: 0 }
 const drawerOpen = ref(false)
 const currentTaskId = ref('')
 
+const traceOpen = ref(false)
+const tracePid = ref('')
+
 const typeOptions = [
   { label: '全部', value: 'all' },
   { label: '审批待办', value: 'approval' },
@@ -190,7 +199,7 @@ const columns = [
   { title: '发起人', key: 'applicant', width: 130 },
   { title: '到达时间', key: 'createTime', width: 150 },
   { title: '状态', key: 'status', width: 100 },
-  { title: '操作', key: 'action', width: 100, fixed: 'right' }
+  { title: '操作', key: 'action', width: 150, fixed: 'right' }
 ]
 
 const pagination = computed(() => ({
@@ -249,6 +258,11 @@ function onTableChange(pag) {
 function openTask(record) {
   currentTaskId.value = record.taskId
   drawerOpen.value = true
+}
+
+function openTrace(record) {
+  tracePid.value = record.processInstanceId
+  traceOpen.value = true
 }
 
 async function createProcess() {
