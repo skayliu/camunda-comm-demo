@@ -1,6 +1,7 @@
 package com.example.camundademo.service;
 
 import com.example.camundademo.entity.BizCommTask;
+import com.example.camundademo.entity.BizTaskDelegate;
 import com.example.camundademo.entity.BizTaskExt;
 import org.camunda.bpm.engine.HistoryService;
 import org.camunda.bpm.engine.IdentityService;
@@ -13,6 +14,7 @@ import org.camunda.bpm.engine.identity.User;
 import org.camunda.bpm.engine.repository.ProcessDefinition;
 import org.camunda.bpm.engine.runtime.ProcessInstance;
 import org.camunda.bpm.engine.task.Comment;
+import org.camunda.bpm.engine.task.DelegationState;
 import org.camunda.bpm.engine.task.Task;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -64,6 +66,9 @@ public class WorkbenchService {
     @Autowired
     private TaskTransferService taskTransferService;
 
+    @Autowired
+    private TaskDelegateService taskDelegateService;
+
     // ===== 当前用户 =====
 
     public Map<String, Object> currentUserInfo(String userId) {
@@ -86,6 +91,12 @@ public class WorkbenchService {
             }
         }
         m.put("displayName", displayName);
+        List<String> groups = identityService.createGroupQuery().groupMember(userId).list()
+                .stream().map(g -> g.getId()).toList();
+        m.put("groups", groups);
+        // 前端据此决定是否展示「全部代理规则」与强制停用入口，
+        // 真正的权限判断仍在 AgentRuleService，前端开关只是少走一次必然失败的请求
+        m.put("admin", groups.contains("admin") || groups.contains("camunda-admin"));
         return m;
     }
 
@@ -152,6 +163,28 @@ public class WorkbenchService {
             vo.put("transferCount", chain.size());
             vo.put("lastTransfer", chain.get(chain.size() - 1));
         }
+
+        // 委托同理整页批量取。受托人打开待办时必须看到“这是谁委托给我的、只能反馈不能办结”，
+        // 否则一个被委托的任务看上去和普通待办没有任何区别。
+        Map<String, BizTaskDelegate> delegations = taskDelegateService.latestByTaskIds(
+                filtered.stream().map(vo -> String.valueOf(vo.get("taskId"))).toList());
+        for (Map<String, Object> vo : filtered) {
+            BizTaskDelegate delegation = delegations.get(String.valueOf(vo.get("taskId")));
+            boolean pending = delegation != null
+                    && BizTaskDelegate.STATUS_PENDING.equals(delegation.getStatus());
+            boolean isCommTask = Boolean.TRUE.equals(vo.get("isCommTask"));
+            if (delegation != null) {
+                vo.put("lastDelegation", taskDelegateService.toVO(delegation));
+                vo.put("delegationStatus", delegation.getStatus());
+                vo.put("delegatedToMe", pending && userId.equals(delegation.getDelegateUserId()));
+                vo.put("delegatedByMe", pending && userId.equals(delegation.getOwnerUserId()));
+            }
+            // 列表按钮与详情抽屉共用同一套后端判定，避免“列表能点、详情报错”。
+            // 沟通中能否委托需要额外查扩展表，列表不做 N+1，交给 delegate 接口兜底拒绝。
+            vo.put("canDelegate", !isCommTask && !pending);
+            vo.put("canResolveDelegation", pending && userId.equals(delegation.getDelegateUserId()));
+            vo.put("canCancelDelegation", pending && userId.equals(delegation.getOwnerUserId()));
+        }
         Map<String, Object> result = pageResult(filtered, page, size);
         Map<String, Object> stats = new LinkedHashMap<>();
         stats.put("total", tasks.size());
@@ -179,14 +212,37 @@ public class WorkbenchService {
             vo.put("commStatusOfSelf", communicationService.getTaskCommStatus(taskId, userId));
         }
         vo.put("comments", commentsOf(taskId));
-        // 转办链与可转办标记：沟通中/沟通待办不可转办，后端与前端共用同一口径
+        // 转办链与可转办标记：沟通中/沟通待办/委托中不可转办，后端与前端共用同一口径
         vo.put("transfers", taskTransferService.listByTaskId(taskId));
+        // 委托链与可操作标记
+        vo.put("delegations", taskDelegateService.listByTaskId(taskId));
+        vo.put("delegationState", task.getDelegationState() == null
+                ? null : task.getDelegationState().name());
+        vo.put("delegationOwner", task.getOwner());
         // 必须再带上「当前是否为办理人」：未签收的候选任务 assignee 为空，
         // 任务详情对任何登录用户开放，只判沟通状态会给出一个点了必然失败的转办按钮。
         boolean currentAssignee = task.getAssignee() != null && task.getAssignee().equals(userId);
-        vo.put("canTransfer", !isComm
-                && currentAssignee
-                && !BizTaskExt.STATUS_COMMUNICATING.equals(commStatus.get("bizStatus")));
+        boolean communicating = BizTaskExt.STATUS_COMMUNICATING.equals(commStatus.get("bizStatus"));
+        boolean delegatedPending = DelegationState.PENDING.equals(task.getDelegationState());
+        vo.put("canTransfer", !isComm && currentAssignee && !communicating && !delegatedPending);
+        vo.put("canDelegate", !isComm && currentAssignee && !communicating && !delegatedPending);
+        // 受托人只有“提交反馈”的权限：不能办结、不能转办、不能再委托
+        vo.put("canResolveDelegation", delegatedPending && currentAssignee);
+        // 委托人可以收回委托（受托人还没交回时）；「可直接办结」模式下任务已归代理人，
+        // 引擎状态不是 PENDING，但委托人仍应能把活要回来
+        Map<String, Object> pendingDelegation = null;
+        for (Map<String, Object> d : taskDelegateService.listByTaskId(taskId)) {
+            if (BizTaskDelegate.STATUS_PENDING.equals(d.get("status"))) {
+                pendingDelegation = d;
+            }
+        }
+        boolean signMode = pendingDelegation != null
+                && BizTaskDelegate.MODE_SIGN.equals(pendingDelegation.get("delegateMode"));
+        vo.put("delegationMode", pendingDelegation == null ? null : pendingDelegation.get("delegateMode"));
+        vo.put("canCancelDelegation", (delegatedPending && userId.equals(task.getOwner()))
+                || (signMode && pendingDelegation != null
+                    && userId.equals(pendingDelegation.get("owner"))
+                    && userId.equals(task.getOwner())));
 
         // 沟通待办：把同一会话内其他对象的反馈进度一并返回，前端可直接还原上下文
         if (isComm) {

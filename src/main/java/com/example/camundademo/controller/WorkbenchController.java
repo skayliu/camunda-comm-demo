@@ -94,7 +94,10 @@ public class WorkbenchController {
         if (task == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "任务不存在或已被处理");
         }
-        if (task.getAssignee() != null && !task.getAssignee().equals(user)) {
+        // 委托中 ASSIGNEE_ 是受托人，但 OWNER_ 仍需能看到详情，否则委托人无法确认进度、也无法收回
+        boolean currentAssignee = task.getAssignee() != null && task.getAssignee().equals(user);
+        boolean delegationOwner = task.getOwner() != null && task.getOwner().equals(user);
+        if (!currentAssignee && !delegationOwner) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "不能查看他人的待办");
         }
         return workbenchService.taskDetail(taskId, user);

@@ -107,6 +107,55 @@ export const wbApi = {
   /** 流程跟踪：BPMN 节点几何 + 节点执行状态与明细 */
   trace(processInstanceId) {
     return http.get(`/wb/trace/${processInstanceId}`)
+  },
+  /** 发起委托：责任仍在我，受托人只能提交反馈 */
+  delegate(taskId, payload) {
+    return http.post(`/wb/task/${taskId}/delegate`, payload)
+  },
+  /** 受托人提交代办意见并交回（resolveTask） */
+  resolveDelegation(taskId, comment) {
+    return http.post(`/wb/task/${taskId}/delegate/resolve`, { comment })
+  },
+  /** 委托人收回委托 */
+  cancelDelegation(taskId, reason) {
+    return http.post(`/wb/task/${taskId}/delegate/cancel`, { reason })
+  },
+  /** 某个流程实例的全部委托记录（我的发起 / 流程跟踪共用） */
+  processDelegations(processInstanceId) {
+    return http.get(`/wb/process/${processInstanceId}/delegations`)
+  },
+  /** 我委托出去的（含已交回 / 已收回，taskActive 表示任务是否仍在运行） */
+  delegationsOut() {
+    return http.get('/wb/delegations/out')
+  },
+  /** 我受托的（含已交回 / 被收回） */
+  delegationsIn() {
+    return http.get('/wb/delegations/in')
+  },
+  /** 委托中条数（对方未交回且任务仍在运行），用于待办中心角标 */
+  pendingDelegationCount() {
+    return http.get('/wb/delegations/pending-count')
+  }
+}
+
+export const agentApi = {
+  /** 我的代理规则 */
+  rules() {
+    return http.get('/agent/rules')
+  },
+  /** 管理员视图：全部规则 */
+  allRules() {
+    return http.get('/agent/rules/all')
+  },
+  save(payload) {
+    return http.post('/agent/rules', payload)
+  },
+  /** 停用规则；cancelActive=true 时同时收回该规则下委托中的任务 */
+  disable(id, cancelActive = false) {
+    return http.post(`/agent/rules/${id}/disable`, { cancelActive })
+  },
+  enable(id) {
+    return http.post(`/agent/rules/${id}/enable`)
   }
 }
 

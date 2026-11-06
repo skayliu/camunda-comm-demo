@@ -1,12 +1,16 @@
 package com.example.camundademo.config;
 
+import com.example.camundademo.entity.BizAgentRule;
 import com.example.camundademo.entity.BizCommSession;
 import com.example.camundademo.entity.BizCommTask;
+import com.example.camundademo.entity.BizTaskDelegate;
 import com.example.camundademo.entity.BizTaskExt;
 import com.example.camundademo.entity.BizTaskTransfer;
 import com.example.camundademo.interceptor.CommunicationCommandInterceptor;
+import com.example.camundademo.persistence.BizAgentRuleManager;
 import com.example.camundademo.persistence.BizCommSessionManager;
 import com.example.camundademo.persistence.BizCommTaskManager;
+import com.example.camundademo.persistence.BizTaskDelegateManager;
 import com.example.camundademo.persistence.BizTaskExtManager;
 import com.example.camundademo.persistence.BizTaskTransferManager;
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
@@ -37,7 +41,9 @@ public class CommProcessEnginePlugin extends AbstractProcessEnginePlugin {
             "mapper/BizTaskExt.xml",
             "mapper/BizCommSession.xml",
             "mapper/BizCommTask.xml",
-            "mapper/BizTaskTransfer.xml"
+            "mapper/BizTaskTransfer.xml",
+            "mapper/BizTaskDelegate.xml",
+            "mapper/BizAgentRule.xml"
     };
 
     @Override
@@ -60,6 +66,8 @@ public class CommProcessEnginePlugin extends AbstractProcessEnginePlugin {
         sessionFactories.add(new BizCommSessionManager.Factory());
         sessionFactories.add(new BizCommTaskManager.Factory());
         sessionFactories.add(new BizTaskTransferManager.Factory());
+        sessionFactories.add(new BizTaskDelegateManager.Factory());
+        sessionFactories.add(new BizAgentRuleManager.Factory());
 
         // 3. 注册自定义命令拦截器（审批时校验沟通状态）
         // 必须放入 post 链：它位于 CommandContextInterceptor 之后，
@@ -107,6 +115,16 @@ public class CommProcessEnginePlugin extends AbstractProcessEnginePlugin {
         updateMappings.put(BizTaskTransfer.class, "updateBizTaskTransfer");
         deleteMappings.put(BizTaskTransfer.class, "deleteBizTaskTransfer");
         selectMappings.put(BizTaskTransfer.class, "selectBizTaskTransfer");
+
+        insertMappings.put(BizTaskDelegate.class, "insertBizTaskDelegate");
+        updateMappings.put(BizTaskDelegate.class, "updateBizTaskDelegate");
+        deleteMappings.put(BizTaskDelegate.class, "deleteBizTaskDelegate");
+        selectMappings.put(BizTaskDelegate.class, "selectBizTaskDelegate");
+
+        insertMappings.put(BizAgentRule.class, "insertBizAgentRule");
+        updateMappings.put(BizAgentRule.class, "updateBizAgentRule");
+        deleteMappings.put(BizAgentRule.class, "deleteBizAgentRule");
+        selectMappings.put(BizAgentRule.class, "selectBizAgentRule");
 
         dbSqlSessionFactory.setInsertStatements(insertMappings);
         dbSqlSessionFactory.setUpdateStatements(updateMappings);

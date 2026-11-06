@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.camundademo.persistence.BizTaskDelegateManager">
+
+    <resultMap id="bizTaskDelegateResultMap" type="com.example.camundademo.entity.BizTaskDelegate">
+        <id property="id" column="ID_" jdbcType="VARCHAR"/>
+        <result property="taskId" column="TASK_ID_" jdbcType="VARCHAR"/>
+        <result property="processInstanceId" column="PROC_INST_ID_" jdbcType="VARCHAR"/>
+        <result property="taskDefKey" column="TASK_DEF_KEY_" jdbcType="VARCHAR"/>
+        <result property="taskName" column="TASK_NAME_" jdbcType="VARCHAR"/>
+        <result property="ownerUserId" column="OWNER_USER_ID_" jdbcType="VARCHAR"/>
+        <result property="delegateUserId" column="DELEGATE_USER_ID_" jdbcType="VARCHAR"/>
+        <result property="source" column="SOURCE_" jdbcType="VARCHAR"/>
+        <result property="delegateMode" column="DELEGATE_MODE_" jdbcType="VARCHAR"/>
+        <result property="agentRuleId" column="AGENT_RULE_ID_" jdbcType="VARCHAR"/>
+        <result property="reason" column="REASON_" jdbcType="VARCHAR"/>
+        <result property="status" column="STATUS_" jdbcType="VARCHAR"/>
+        <result property="resolveContent" column="RESOLVE_CONTENT_" jdbcType="CLOB"/>
+        <result property="resolveTime" column="RESOLVE_TIME_" jdbcType="TIMESTAMP"/>
+        <result property="createTime" column="CREATE_TIME_" jdbcType="TIMESTAMP"/>
+        <result property="updateTime" column="UPDATE_TIME_" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <insert id="insertBizTaskDelegate" parameterType="com.example.camundademo.entity.BizTaskDelegate">
+        INSERT INTO BIZ_TASK_DELEGATE_ (ID_, TASK_ID_, PROC_INST_ID_, TASK_DEF_KEY_, TASK_NAME_,
+            OWNER_USER_ID_, DELEGATE_USER_ID_, SOURCE_, DELEGATE_MODE_, AGENT_RULE_ID_, REASON_, STATUS_,
+            RESOLVE_CONTENT_, RESOLVE_TIME_, CREATE_TIME_, UPDATE_TIME_)
+        VALUES (#{id, jdbcType=VARCHAR}, #{taskId, jdbcType=VARCHAR}, #{processInstanceId, jdbcType=VARCHAR},
+                #{taskDefKey, jdbcType=VARCHAR}, #{taskName, jdbcType=VARCHAR},
+                #{ownerUserId, jdbcType=VARCHAR}, #{delegateUserId, jdbcType=VARCHAR},
+                #{source, jdbcType=VARCHAR}, #{delegateMode, jdbcType=VARCHAR},
+                #{agentRuleId, jdbcType=VARCHAR},
+                #{reason, jdbcType=VARCHAR}, #{status, jdbcType=VARCHAR},
+                #{resolveContent, jdbcType=CLOB}, #{resolveTime, jdbcType=TIMESTAMP},
+                #{createTime, jdbcType=TIMESTAMP}, #{updateTime, jdbcType=TIMESTAMP})
+    </insert>
+
+    <update id="updateBizTaskDelegate" parameterType="com.example.camundademo.entity.BizTaskDelegate">
+        UPDATE BIZ_TASK_DELEGATE_
+        SET STATUS_ = #{status, jdbcType=VARCHAR},
+            RESOLVE_CONTENT_ = #{resolveContent, jdbcType=CLOB},
+            RESOLVE_TIME_ = #{resolveTime, jdbcType=TIMESTAMP},
+            UPDATE_TIME_ = #{updateTime, jdbcType=TIMESTAMP}
+        WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </update>
+
+    <delete id="deleteBizTaskDelegate" parameterType="string">
+        DELETE FROM BIZ_TASK_DELEGATE_ WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </delete>
+
+    <select id="selectBizTaskDelegate" parameterType="string" resultMap="bizTaskDelegateResultMap">
+        SELECT * FROM BIZ_TASK_DELEGATE_ WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </select>
+
+    <select id="selectByTaskId" parameterType="string" resultMap="bizTaskDelegateResultMap">
+        SELECT * FROM BIZ_TASK_DELEGATE_ WHERE TASK_ID_ = #{taskId, jdbcType=VARCHAR}
+        ORDER BY CREATE_TIME_ ASC, ID_ ASC
+    </select>
+
+    <select id="selectByTaskIds" parameterType="map" resultMap="bizTaskDelegateResultMap">
+        SELECT * FROM BIZ_TASK_DELEGATE_
+        WHERE TASK_ID_ IN
+        <foreach collection="list" item="taskId" open="(" separator="," close=")">
+            #{taskId, jdbcType=VARCHAR}
+        </foreach>
+        ORDER BY CREATE_TIME_ ASC, ID_ ASC
+    </select>
+
+    <select id="selectByProcessInstanceId" parameterType="string" resultMap="bizTaskDelegateResultMap">
+        SELECT * FROM BIZ_TASK_DELEGATE_ WHERE PROC_INST_ID_ = #{processInstanceId, jdbcType=VARCHAR}
+        ORDER BY CREATE_TIME_ ASC, ID_ ASC
+    </select>
+
+    <select id="selectByOwner" parameterType="string" resultMap="bizTaskDelegateResultMap">
+        SELECT * FROM BIZ_TASK_DELEGATE_ WHERE OWNER_USER_ID_ = #{ownerUserId, jdbcType=VARCHAR}
+        ORDER BY CREATE_TIME_ DESC, ID_ DESC
+    </select>
+
+    <select id="selectByDelegateUser" parameterType="string" resultMap="bizTaskDelegateResultMap">
+        SELECT * FROM BIZ_TASK_DELEGATE_ WHERE DELEGATE_USER_ID_ = #{delegateUserId, jdbcType=VARCHAR}
+        ORDER BY CREATE_TIME_ DESC, ID_ DESC
+    </select>
+
+    <!-- 按规则批量取委托中记录：停用规则时用来统计/收回，避免按规则逐条查造成 N+1 -->
+    <select id="selectPendingByAgentRuleIds" parameterType="map" resultMap="bizTaskDelegateResultMap">
+        SELECT * FROM BIZ_TASK_DELEGATE_
+        WHERE STATUS_ = 'PENDING'
+        AND AGENT_RULE_ID_ IN
+        <foreach collection="list" item="ruleId" open="(" separator="," close=")">
+            #{ruleId, jdbcType=VARCHAR}
+        </foreach>
+        ORDER BY CREATE_TIME_ ASC, ID_ ASC
+    </select>
+
+    <select id="selectPendingByTaskId" parameterType="string" resultMap="bizTaskDelegateResultMap">
+        SELECT * FROM BIZ_TASK_DELEGATE_
+        WHERE TASK_ID_ = #{taskId, jdbcType=VARCHAR} AND STATUS_ = 'PENDING'
+        ORDER BY CREATE_TIME_ DESC, ID_ DESC
+    </select>
+
+</mapper>

@@ -20,6 +20,7 @@ db/migration/
 |---|---|---|
 | V1 | 4 张业务表 + 主键 + 唯一约束 | 不含索引 |
 | V2 | 16 个索引（9 单列 + 7 组合） | 列序与查询谓词严格对应 |
+| V3 | 委托表 `BIZ_TASK_DELEGATE_`、代理规则表 `BIZ_AGENT_RULE_` + 4 个索引 | 建表与索引同版本，两张表强相关 |
 
 索引集中在 V2 而不是随建表写，是为了让 7 个方言能用同一份清单逐项比对；已执行的版本不要修改，
 Flyway 会按 checksum 校验，改动历史脚本会让服务启动直接失败。
@@ -53,6 +54,14 @@ done
 for v in h2 mysql mariadb postgresql oracle sqlserver db2; do
   printf "%s " "$v"
   grep -oE 'IDX_[A-Z_]+' src/main/resources/db/migration/$v/V2__composite_indexes.sql | sort | md5sum
+done
+
+# V3（委托 / 代理）同样逐行一致
+for v in h2 mysql mariadb postgresql oracle sqlserver db2; do
+  printf "%s " "$v"
+  grep -oE '^\s{4}[A-Z0-9_]+\s' src/main/resources/db/migration/$v/V3__delegate_and_agent.sql | tr -d ' ' | sort | md5sum
+  printf "%s " "$v"
+  grep -oE 'IDX_[A-Z_]+' src/main/resources/db/migration/$v/V3__delegate_and_agent.sql | sort | md5sum
 done
 ```
 

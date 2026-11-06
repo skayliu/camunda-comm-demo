@@ -130,7 +130,16 @@
           <TransferChain :transfers="transfers" />
         </DetailSection>
 
-        <DetailSection title="当前节点" :style="{ marginTop: transfers.length ? '' : '20px' }">
+        <DetailSection
+          v-if="delegations.length"
+          title="委托记录"
+          :extra="`共 ${delegations.length} 次`"
+          style="margin-top: 20px"
+        >
+          <DelegationChain :delegations="delegations" />
+        </DetailSection>
+
+        <DetailSection title="当前节点" :style="{ marginTop: (transfers.length || delegations.length) ? '' : '20px' }">
           <div v-if="current.currentTasks && current.currentTasks.length">
             <div
               v-for="t in current.currentTasks"
@@ -174,6 +183,7 @@ import ProcessTraceModal from '../components/ProcessTraceModal.vue'
 import DetailDrawer from '../components/DetailDrawer.vue'
 import DetailSection from '../components/DetailSection.vue'
 import TransferChain from '../components/TransferChain.vue'
+import DelegationChain from '../components/DelegationChain.vue'
 
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
@@ -188,6 +198,7 @@ const total = ref(0)
 const detailOpen = ref(false)
 const current = ref(null)
 const transfers = ref([])
+const delegations = ref([])
 const traceOpen = ref(false)
 const tracePid = ref('')
 
@@ -253,8 +264,19 @@ function onTableChange(pag) {
 function openDetail(record) {
   current.value = record
   transfers.value = []
+  delegations.value = []
   detailOpen.value = true
   loadTransfers(record.processInstanceId)
+  loadDelegations(record.processInstanceId)
+}
+
+// 委托记录同样是附加信息，失败只留空，不影响详情主体
+async function loadDelegations(processInstanceId) {
+  try {
+    delegations.value = (await wbApi.processDelegations(processInstanceId)) || []
+  } catch (e) {
+    delegations.value = []
+  }
 }
 
 // 转办链是附加信息：接口失败只留空，不打断详情展示

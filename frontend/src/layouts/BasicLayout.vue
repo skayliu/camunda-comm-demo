@@ -24,17 +24,34 @@
         <a-menu-item key="todo">
           <template #icon><InboxOutlined /></template>
           <span class="menu-label">
-            待办中心
-            <a-badge v-if="todoCount > 0" :count="todoCount" :overflow-count="99" />
+            <span>待办中心</span>
+            <span class="menu-badges">
+              <a-badge v-if="todoCount > 0" :count="todoCount" :overflow-count="99" />
+              <a-tooltip
+                v-if="delegatingCount > 0"
+                :title="`已委托给他人、等待对方反馈的任务 ${delegatingCount} 条`"
+                placement="right"
+              >
+                <span class="menu-delegating">{{ delegatingCount }} 委托中</span>
+              </a-tooltip>
+            </span>
           </span>
         </a-menu-item>
         <a-menu-item key="done">
           <template #icon><CheckCircleOutlined /></template>
           <span class="menu-label">我的已办</span>
         </a-menu-item>
+        <a-menu-item key="delegation">
+          <template #icon><SwapOutlined /></template>
+          <span class="menu-label">委托记录</span>
+        </a-menu-item>
         <a-menu-item key="started">
           <template #icon><SendOutlined /></template>
           <span class="menu-label">我的发起</span>
+        </a-menu-item>
+        <a-menu-item key="agent">
+          <template #icon><UserSwitchOutlined /></template>
+          <span class="menu-label">代理设置</span>
         </a-menu-item>
       </a-menu>
     </a-layout-sider>
@@ -101,7 +118,9 @@ import {
   MenuUnfoldOutlined,
   ReloadOutlined,
   SendOutlined,
-  UserOutlined
+  SwapOutlined,
+  UserOutlined,
+  UserSwitchOutlined
 } from '@ant-design/icons-vue'
 import { authApi, getUser, logout, wbApi } from '../api'
 
@@ -111,6 +130,8 @@ const router = useRouter()
 const collapsed = ref(false)
 const reloadKey = ref(0)
 const todoCount = ref(0)
+// 我委托出去、对方还没交回的条数：显示在待办中心菜单上，一眼看到有多少活压在别人手里
+const delegatingCount = ref(0)
 const displayName = ref('')
 const user = ref(getUser())
 
@@ -136,11 +157,16 @@ function handleLogout() {
 }
 
 async function loadCount() {
-  try {
-    const res = await wbApi.todo({ page: 1, size: 1, type: 'all' })
-    todoCount.value = (res.stats && res.stats.total) || 0
-  } catch (e) {
-    // 顶栏徽标失败不打断页面
+  // 两个数各自独立：任一接口失败都不能把另一个角标清空
+  const [todoRes, delegationRes] = await Promise.allSettled([
+    wbApi.todo({ page: 1, size: 1, type: 'all' }),
+    wbApi.pendingDelegationCount()
+  ])
+  if (todoRes.status === 'fulfilled') {
+    todoCount.value = (todoRes.value.stats && todoRes.value.stats.total) || 0
+  }
+  if (delegationRes.status === 'fulfilled') {
+    delegatingCount.value = (delegationRes.value && delegationRes.value.count) || 0
   }
 }
 
@@ -163,6 +189,23 @@ watch(() => route.name, () => loadCount())
   align-items: center;
   justify-content: space-between;
   width: 100%;
+}
+
+.menu-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 委托中：紫色小胶囊，与红色的待办数量区分，避免两个数字混在一起 */
+.menu-delegating {
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 16px;
+  color: #d3adf7;
+  white-space: nowrap;
+  background: rgba(146, 84, 222, 0.3);
+  border-radius: 8px;
 }
 
 .collapse-btn,

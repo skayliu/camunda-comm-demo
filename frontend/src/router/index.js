@@ -30,6 +30,18 @@ const routes = [
         name: 'started',
         component: () => import('../views/StartedList.vue'),
         meta: { title: '我的发起' }
+      },
+      {
+        path: 'agent',
+        name: 'agent',
+        component: () => import('../views/AgentRules.vue'),
+        meta: { title: '代理设置' }
+      },
+      {
+        path: 'delegation',
+        name: 'delegation',
+        component: () => import('../views/DelegationList.vue'),
+        meta: { title: '委托记录' }
       }
     ]
   },

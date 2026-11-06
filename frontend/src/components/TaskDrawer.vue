@@ -12,6 +12,8 @@
           {{ task.isFollowUp ? '沟通追问' : '沟通待办' }}
         </a-tag>
         <a-tag v-else color="blue">审批待办</a-tag>
+        <a-tag v-if="task.delegationState === 'PENDING'" color="purple">委托中</a-tag>
+        <a-tag v-else-if="task.delegationMode === 'SIGN'" color="geekblue">全权代办</a-tag>
         <a-tag v-if="transfers.length" color="cyan">已转办 {{ transfers.length }} 次</a-tag>
       </div>
     </template>
@@ -45,6 +47,36 @@
       <DetailSection v-if="transfers.length" title="转办记录" :extra="`共 ${transfers.length} 次`">
         <TransferChain :transfers="transfers" :current-assignee="task.assignee" />
       </DetailSection>
+
+      <!-- 委托记录：责任仍在委托人，受托人只能提交反馈 -->
+      <DetailSection v-if="delegations.length" title="委托记录" :extra="`共 ${delegations.length} 次`">
+        <DelegationChain :delegations="delegations" />
+      </DetailSection>
+
+      <div v-if="task.canResolveDelegation" class="drawer-section">
+        <div class="drawer-section-title">委托反馈</div>
+        <a-alert
+          type="warning"
+          show-icon
+          style="margin-bottom: 10px"
+          message="你正在代办此待办"
+          description="提交反馈后任务回到委托人，由委托人确认办结；代办意见会单独记录在委托链上。"
+        />
+        <a-textarea
+          v-model:value="resolveContent"
+          :rows="4"
+          :maxlength="2000"
+          show-count
+          placeholder="填写代办结果与建议"
+        />
+      </div>
+      <a-alert
+        v-else-if="task.canCancelDelegation"
+        type="info"
+        show-icon
+        message="已委托给他人办理"
+        :description="`当前受托人：${task.assignee || '-'}。对方提交反馈或你收回后，任务才会回到你的待办。`"
+      />
 
         <!-- 沟通待办：我的反馈 -->
         <template v-if="task.isCommTask">
@@ -298,6 +330,21 @@
         <template v-else>
           <!-- 转办条件由后端 canTransfer 统一计算：当前办理人本人、非沟通待办、不在沟通中 -->
           <a-button v-if="task.canTransfer" @click="openTransfer">转办</a-button>
+          <a-button v-if="task.canDelegate" @click="delegateOpen = true">委托</a-button>
+          <template v-if="task.canResolveDelegation">
+            <a-button type="primary" :loading="delegationSubmitting" @click="submitResolve">
+              提交反馈并交回
+            </a-button>
+          </template>
+          <a-popconfirm
+            v-if="task.canCancelDelegation"
+            title="收回委托？任务将回到你的待办"
+            ok-text="收回"
+            cancel-text="取消"
+            @confirm="cancelDelegation"
+          >
+            <a-button danger>收回委托</a-button>
+          </a-popconfirm>
           <a-button
             :disabled="!canInitiate"
             :title="canInitiate ? '' : '仅当前待办处理人可发起沟通'"
@@ -315,12 +362,14 @@
             <a-button danger>全部收回</a-button>
           </a-popconfirm>
           <a-tooltip
-            :title="isLocked ? '存在未反馈且未收回的沟通对象，无法审批' : ''"
+            :title="task.delegationState === 'PENDING'
+              ? '委托中的任务需先由受托人提交反馈或委托人收回'
+              : (isLocked ? '存在未反馈且未收回的沟通对象，无法审批' : '')"
           >
             <a-button
               type="primary"
               :loading="submitting"
-              :disabled="isLocked"
+              :disabled="isLocked || task.delegationState === 'PENDING'"
               @click="submitApprove"
             >
               通过审批
@@ -384,6 +433,13 @@
       :task-name="task.taskName"
       @done="onTransferDone"
     />
+
+    <DelegateModal
+      v-model:open="delegateOpen"
+      :task-id="taskId"
+      :task-name="task.taskName"
+      @done="onDelegateDone"
+    />
     </template>
   </DetailDrawer>
 </template>
@@ -394,6 +450,8 @@ import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import { commApi, errorText, wbApi } from '../api'
 import TransferModal from './TransferModal.vue'
+import DelegateModal from './DelegateModal.vue'
+import DelegationChain from './DelegationChain.vue'
 import DetailDrawer from './DetailDrawer.vue'
 import DetailSection from './DetailSection.vue'
 import TransferChain from './TransferChain.vue'
@@ -415,6 +473,56 @@ const replyContent = ref('')
 // 这里不做二次排序，避免与落库顺序不一致。
 const transferOpen = ref(false)
 const transfers = computed(() => (Array.isArray(task.value.transfers) ? task.value.transfers : []))
+
+// 委托：责任仍归委托人，受托人只能提交反馈并交回
+const delegateOpen = ref(false)
+const delegationSubmitting = ref(false)
+const resolveContent = ref('')
+const delegations = computed(() => (Array.isArray(task.value.delegations) ? task.value.delegations : []))
+
+function onDelegateDone() {
+  // 委托后任务已不归自己，taskDetail 会 403，直接关闭并刷新列表
+  delegateOpen.value = false
+  close()
+  emit('refresh')
+}
+
+async function submitResolve() {
+  if (!resolveContent.value.trim()) {
+    message.warning('请填写代办反馈')
+    return
+  }
+  delegationSubmitting.value = true
+  try {
+    const res = await wbApi.resolveDelegation(props.taskId, resolveContent.value.trim())
+    if (res && res.error) {
+      message.warning(res.message || '无法提交反馈')
+      return
+    }
+    message.success('反馈已提交，任务已交回委托人')
+    close()
+    emit('refresh')
+  } catch (e) {
+    message.error(errorText(e))
+  } finally {
+    delegationSubmitting.value = false
+  }
+}
+
+async function cancelDelegation() {
+  try {
+    const res = await wbApi.cancelDelegation(props.taskId, '')
+    if (res && res.error) {
+      message.warning(res.message || '无法收回委托')
+      return
+    }
+    message.success('已收回委托')
+    await load()
+    emit('refresh')
+  } catch (e) {
+    message.error(errorText(e))
+  }
+}
 
 function openTransfer() {
   transferOpen.value = true

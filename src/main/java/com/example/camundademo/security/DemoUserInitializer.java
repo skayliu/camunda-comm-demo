@@ -1,6 +1,7 @@
 package com.example.camundademo.security;
 
 import org.camunda.bpm.engine.IdentityService;
+import org.camunda.bpm.engine.identity.Group;
 import org.camunda.bpm.engine.identity.User;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -8,7 +9,9 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 演示账号初始化：把测试/演示用到的用户建到 Camunda Identity 中（密码统一 demo）。
@@ -27,7 +30,33 @@ public class DemoUserInitializer implements ApplicationRunner {
     private static final List<String> DEMO_USERS = List.of(
             "applicant", "applicant2", "applicant3", "applicant4", "applicant5", "applicant6",
             "manager", "finance",
-            "alice", "bob", "carol", "dave", "erin", "frank", "grace", "henry", "mallory");
+            "alice", "bob", "carol", "dave", "erin", "frank", "grace", "henry", "mallory",
+            "admin");
+
+    /**
+     * 演示用管理员账号所属的组。
+     *
+     * <p>{@code admin} 是应用自定义的管理组，{@code camunda-admin} 是 Camunda 内置的
+     * 全权限组。代理规则的“管理员强制停用他人规则”依赖其中之一，
+     * 之前演示账号不在任何组里，这条路径必须手工配置才能验证。这里显式建组并授权，
+     * 让 {@code admin / demo} 一登录就能走通完整链路。</p>
+     */
+    private static final Map<String, List<String>> DEMO_GROUP_MEMBERS = memberships();
+
+    private static final Map<String, String> DEMO_GROUP_NAMES = groupNames();
+
+    private static Map<String, List<String>> memberships() {
+        Map<String, List<String>> map = new LinkedHashMap<>();
+        map.put("admin", List.of("admin", "camunda-admin"));
+        return map;
+    }
+
+    private static Map<String, String> groupNames() {
+        Map<String, String> map = new LinkedHashMap<>();
+        map.put("admin", "Application Administrators");
+        map.put("camunda-admin", "Camunda BPM Administrators");
+        return map;
+    }
 
     private final IdentityService identityService;
 
@@ -52,5 +81,31 @@ public class DemoUserInitializer implements ApplicationRunner {
                 log.warn("演示用户 {} 初始化失败，认证将不可用", userId, e);
             }
         }
+        ensureGroupMemberships();
+    }
+
+    /**
+     * 建组并授权：组已存在则复用，成员关系已存在则跳过，可重复启动。
+     *
+     * <p>单独 try/catch，避免某个组创建失败（例如只读身份库）连带影响其他账号。</p>
+     */
+    private void ensureGroupMemberships() {
+        DEMO_GROUP_MEMBERS.forEach((userId, groupIds) -> {
+            for (String groupId : groupIds) {
+                try {
+                    if (identityService.createGroupQuery().groupId(groupId).count() == 0) {
+                        Group group = identityService.newGroup(groupId);
+                        group.setName(DEMO_GROUP_NAMES.getOrDefault(groupId, groupId));
+                        group.setType("WORKFLOW");
+                        identityService.saveGroup(group);
+                    }
+                    if (identityService.createGroupQuery().groupMember(userId).groupId(groupId).count() == 0) {
+                        identityService.createMembership(userId, groupId);
+                    }
+                } catch (RuntimeException e) {
+                    log.warn("演示用户 {} 加入组 {} 失败，管理员能力将不可用", userId, groupId, e);
+                }
+            }
+        });
     }
 }

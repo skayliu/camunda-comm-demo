@@ -99,6 +99,9 @@
             <div v-else-if="record.transferCount" class="muted" style="font-size: 12px">
               由 {{ record.lastTransfer.from }} 转办
             </div>
+            <div v-if="record.delegatedToMe" class="muted" style="font-size: 12px">
+              由 {{ record.lastDelegation.owner }} 委托代办
+            </div>
           </template>
 
           <template v-else-if="column.key === 'applicant'">
@@ -135,6 +138,14 @@
               >
                 转办
               </a-button>
+              <a-button
+                v-if="record.canDelegate"
+                type="link"
+                size="small"
+                @click="openDelegate(record)"
+              >
+                委托
+              </a-button>
               <a-button type="link" size="small" @click="openTrace(record)">跟踪</a-button>
             </a-space>
           </template>
@@ -162,6 +173,13 @@
       :task-name="transferTask.taskName"
       @done="load"
     />
+
+    <DelegateModal
+      v-model:open="delegateOpen"
+      :task-id="delegateTask.taskId"
+      :task-name="delegateTask.taskName"
+      @done="load"
+    />
   </div>
 </template>
 
@@ -183,6 +201,7 @@ import { commApi, errorText, wbApi } from '../api'
 import TaskDrawer from '../components/TaskDrawer.vue'
 import ProcessTraceModal from '../components/ProcessTraceModal.vue'
 import TransferModal from '../components/TransferModal.vue'
+import DelegateModal from '../components/DelegateModal.vue'
 
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
@@ -207,6 +226,15 @@ const tracePid = ref('')
 
 const transferOpen = ref(false)
 const transferTask = reactive({ taskId: '', taskName: '' })
+
+const delegateOpen = ref(false)
+const delegateTask = reactive({ taskId: '', taskName: '' })
+
+function openDelegate(record) {
+  delegateTask.taskId = record.taskId
+  delegateTask.taskName = record.taskName
+  delegateOpen.value = true
+}
 
 const typeOptions = [
   { label: '全部', value: 'all' },

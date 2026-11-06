@@ -96,6 +96,28 @@
           </div>
         </div>
 
+        <!-- 委托记录：责任仍在委托人，展示谁把哪条待办交给了谁 -->
+        <div v-if="delegations.length" class="trace-delegation-panel" style="margin: 0 0 12px; padding: 10px 12px; background: #f9f0ff; border: 1px solid #efdbff; border-radius: 8px">
+          <div style="font-weight: 600; font-size: 13px; margin-bottom: 6px; color: #531dab">
+            委托记录 <span style="font-weight: 400; color: rgba(0,0,0,.45)">共 {{ delegations.length }} 次</span>
+          </div>
+          <div
+            v-for="d in delegations"
+            :key="d.id"
+            style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; padding: 3px 0"
+          >
+            <b>{{ d.owner }}</b>
+            <span style="color: #9254de">⇢</span>
+            <b>{{ d.delegateUser }}</b>
+            <a-tag :color="d.status === 'PENDING' ? 'orange' : (d.status === 'RESOLVED' ? 'green' : 'default')" style="margin-inline-end: 0">
+              {{ d.status === 'PENDING' ? '委托中' : (d.status === 'RESOLVED' ? '已交回' : '已收回') }}
+            </a-tag>
+            <a-tag v-if="d.source === 'AGENT'" color="purple" style="margin-inline-end: 0">代理</a-tag>
+            <span class="muted">{{ d.taskName }} · {{ fmtShort(d.createTime) }}</span>
+            <span v-if="d.resolveContent" class="muted">· 反馈：{{ d.resolveContent }}</span>
+          </div>
+        </div>
+
         <!-- 图例（视图操作统一收进画布右上角的浮动工具条） -->
         <div class="trace-toolbar">
           <div class="trace-legend">
@@ -1045,6 +1067,8 @@ const isFullscreen = ref(true)
 const canvasFullscreen = ref(false)
 const loading = ref(false)
 const data = ref(null)
+// 当前实例的委托记录：与跟踪数据并行加载，失败只影响这一块
+const delegations = ref([])
 // 当前正在展示的实例：初始为入口实例，下钻后变为被调用的子流程实例
 const currentPid = ref('')
 // 下钻栈：每层记录上一级实例，用于面包屑与「返回上级」
@@ -2683,6 +2707,11 @@ async function load(pid = currentPid.value || props.processInstanceId) {
   loading.value = true
   try {
     data.value = await wbApi.trace(pid)
+    try {
+      delegations.value = (await wbApi.processDelegations(pid)) || []
+    } catch (e) {
+      delegations.value = []
+    }
     currentPid.value = pid
     selectedId.value = ''
     expandedKeys.value = []

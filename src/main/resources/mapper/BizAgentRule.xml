@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.camundademo.persistence.BizAgentRuleManager">
+
+    <resultMap id="bizAgentRuleResultMap" type="com.example.camundademo.entity.BizAgentRule">
+        <id property="id" column="ID_" jdbcType="VARCHAR"/>
+        <result property="ownerUserId" column="OWNER_USER_ID_" jdbcType="VARCHAR"/>
+        <result property="agentUserId" column="AGENT_USER_ID_" jdbcType="VARCHAR"/>
+        <result property="startTime" column="START_TIME_" jdbcType="TIMESTAMP"/>
+        <result property="endTime" column="END_TIME_" jdbcType="TIMESTAMP"/>
+        <result property="processDefinitionKeys" column="PROCESS_DEFINITION_KEYS_" jdbcType="VARCHAR"/>
+        <result property="enabled" column="IS_ENABLED_" jdbcType="INTEGER"/>
+        <result property="delegateMode" column="DELEGATE_MODE_" jdbcType="VARCHAR"/>
+        <result property="createTime" column="CREATE_TIME_" jdbcType="TIMESTAMP"/>
+        <result property="updateTime" column="UPDATE_TIME_" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <insert id="insertBizAgentRule" parameterType="com.example.camundademo.entity.BizAgentRule">
+        INSERT INTO BIZ_AGENT_RULE_ (ID_, OWNER_USER_ID_, AGENT_USER_ID_, START_TIME_, END_TIME_,
+            PROCESS_DEFINITION_KEYS_, IS_ENABLED_, DELEGATE_MODE_, CREATE_TIME_, UPDATE_TIME_)
+        VALUES (#{id, jdbcType=VARCHAR}, #{ownerUserId, jdbcType=VARCHAR}, #{agentUserId, jdbcType=VARCHAR},
+                #{startTime, jdbcType=TIMESTAMP}, #{endTime, jdbcType=TIMESTAMP},
+                #{processDefinitionKeys, jdbcType=VARCHAR}, #{enabled, jdbcType=INTEGER},
+                #{delegateMode, jdbcType=VARCHAR},
+                #{createTime, jdbcType=TIMESTAMP}, #{updateTime, jdbcType=TIMESTAMP})
+    </insert>
+
+    <update id="updateBizAgentRule" parameterType="com.example.camundademo.entity.BizAgentRule">
+        UPDATE BIZ_AGENT_RULE_
+        SET AGENT_USER_ID_ = #{agentUserId, jdbcType=VARCHAR},
+            START_TIME_ = #{startTime, jdbcType=TIMESTAMP},
+            END_TIME_ = #{endTime, jdbcType=TIMESTAMP},
+            PROCESS_DEFINITION_KEYS_ = #{processDefinitionKeys, jdbcType=VARCHAR},
+            IS_ENABLED_ = #{enabled, jdbcType=INTEGER},
+            DELEGATE_MODE_ = #{delegateMode, jdbcType=VARCHAR},
+            UPDATE_TIME_ = #{updateTime, jdbcType=TIMESTAMP}
+        WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </update>
+
+    <delete id="deleteBizAgentRule" parameterType="string">
+        DELETE FROM BIZ_AGENT_RULE_ WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </delete>
+
+    <select id="selectBizAgentRule" parameterType="string" resultMap="bizAgentRuleResultMap">
+        SELECT * FROM BIZ_AGENT_RULE_ WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </select>
+
+    <select id="selectByOwner" parameterType="string" resultMap="bizAgentRuleResultMap">
+        SELECT * FROM BIZ_AGENT_RULE_ WHERE OWNER_USER_ID_ = #{ownerUserId, jdbcType=VARCHAR}
+        ORDER BY START_TIME_ DESC, ID_ DESC
+    </select>
+
+    <select id="selectAll" resultMap="bizAgentRuleResultMap">
+        SELECT * FROM BIZ_AGENT_RULE_
+        ORDER BY START_TIME_ DESC, ID_ DESC
+    </select>
+
+    <select id="selectValidByOwner" parameterType="map" resultMap="bizAgentRuleResultMap">
+        SELECT * FROM BIZ_AGENT_RULE_
+        WHERE OWNER_USER_ID_ = #{ownerUserId, jdbcType=VARCHAR}
+          AND IS_ENABLED_ = 1
+          AND START_TIME_ &lt;= #{now, jdbcType=TIMESTAMP}
+          AND END_TIME_ &gt;= #{now, jdbcType=TIMESTAMP}
+        ORDER BY CREATE_TIME_ DESC, ID_ DESC
+    </select>
+
+</mapper>

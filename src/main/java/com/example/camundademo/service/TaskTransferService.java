@@ -10,6 +10,7 @@ import org.camunda.bpm.engine.ProcessEngine;
 import org.camunda.bpm.engine.TaskService;
 import org.camunda.bpm.engine.impl.cfg.ProcessEngineConfigurationImpl;
 import org.camunda.bpm.engine.impl.interceptor.Command;
+import org.camunda.bpm.engine.task.DelegationState;
 import org.camunda.bpm.engine.task.Task;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -83,6 +84,11 @@ public class TaskTransferService {
                 // 沟通任务的办理人是沟通对象本人，改派会让沟通记录里的 targetId 与任务办理人不一致，
                 // 反馈权限（仅沟通对象本人可反馈）随即失效。沟通待办请直接反馈或由发起人收回。
                 throw new BusinessException("沟通待办不支持转办，请提交反馈或由发起人收回");
+            }
+            if (DelegationState.PENDING.equals(task.getDelegationState())) {
+                // 受托人只对“代办”负责，没有处置权。允许转办等于把责任链继续往下踢，
+                // 原办理人既不知道转给了谁，也无法追溯。受托人只能提交反馈交回。
+                throw new BusinessException("该待办处于委托中，受托人不能转办，请提交反馈或由委托人收回");
             }
 
             String target = targetUserId == null ? null : targetUserId.trim();
