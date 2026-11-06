@@ -13,10 +13,14 @@
 - ✅ 沟通任务完全旁路：无executionId，不影响主流程流转、网关汇聚、多实例完成
 
 ## 技术栈
-- Camunda 7.20 Spring Boot
-- Spring Boot 2.7.18
-- H2 内存数据库（零依赖）
+- Camunda **7.24.0**（`camunda-bpm-spring-boot-starter-webapp` + `-rest`）
+- Spring Boot **3.5.16** / **Java 17**
+- H2 内存数据库（零依赖）；引擎表结构与业务扩展表统一由 **Flyway** 管理
 - Camunda 自带 MyBatis（自定义实体 + SessionFactory 机制）
+- 前端：**Vue 3.5 + ant-design-vue 4 + Vite 5**，构建产物输出到 `src/main/resources/static/app`，访问路径 `/app/`
+
+> 版本以 `pom.xml` 为准。Camunda 7.24 已移除 `customMybatisXMLMappers`，
+> 自定义 Mapper 需在 `postInit` 阶段显式装载，插件里已按此实现。
 
 ## 启动方式
 ```bash
@@ -25,8 +29,19 @@ mvn spring-boot:run
 ```
 
 启动后访问：
+- 待办中心（前端）: http://localhost:8080/app/
 - Camunda Cockpit: http://localhost:8080/camunda （demo/demo）
 - H2 控制台: http://localhost:8080/h2 （JDBC URL: jdbc:h2:mem:camundadb，用户名sa，密码空）
+
+## 测试
+
+```bash
+mvn test                          # 全量
+mvn test -Dtest=CommunicationFlowTest   # 只跑沟通主链路
+```
+
+测试断言的是**引擎事实**而不只是接口 200：历史任务是否存在、删除原因是什么、
+`taskDefinitionKey` 是否带 `#COMM`、`ACT_HI_ACTINST` 是否为空等。
 
 ## 演示场景（curl脚本）
 
@@ -120,21 +135,54 @@ curl "http://localhost:8080/api/comm/status/$MGR_TASK_ID?userId=manager"
 curl -X POST "http://localhost:8080/api/comm/demo/complete/$MGR_TASK_ID"
 ```
 
+## 功能清单
+
+| 模块 | 能力 | 关键实现 |
+|---|---|---|
+| 旁路沟通 | 发起 / 补充对象 / 追问 / 转交 / 部分或全部收回 / 反馈 | `TaskService.newTask()` 建无 `executionId` 的旁观任务，`taskDefinitionKey` = `源节点key#COMM` |
+| 审批锁定 | 沟通中禁止完成任务，所有渠道一致拦截 | 引擎命令拦截器（主）+ 任务 `complete` 监听器（兜底） |
+| 待办转办 | 永久移交，保留完整转办链 | `setAssignee` 改派 + `BIZ_TASK_TRANSFER_` 落链，同一引擎命令内完成 |
+| 流程跟踪 | BPMN 图渲染、节点/连线三态、沟通角标、转办角标 | 不引 bpmn-js：DI 取几何、历史表取状态、两端时序推断连线 |
+| 待办中心 | 我的待办 / 已办 / 我的发起，沟通与追问筛选 | 全部走认证上下文取当前用户，请求体不接受 `userId` |
+
 ## 架构说明
 
 ### 扩展点
 1. **ProcessEnginePlugin**: `CommProcessEnginePlugin` - 注册Mapper、SessionFactory、BPMN解析监听器、命令拦截器
 2. **GlobalUserTaskParseListener**: 给所有UserTask自动注入创建监听器，零BPMN配置
 3. **TaskCreateInitListener**: 任务创建时自动初始化BizTaskExt记录
-4. **CommunicationCommandInterceptor**: 引擎内核层拦截CompleteTaskCmd，沟通中禁止审批
-5. **自定义实体**: BizTaskExt/BizCommSession/BizCommTask，实现DbEntity接口
-6. **自定义Manager(Session)**: 继承AbstractManager，通过DbSqlSession访问MyBatis
-7. **Mapper XML**: 遵循Camunda原生风格，statement id格式为insertEntity/updateEntity/deleteEntity/selectEntity
+4. **CommunicationCommandInterceptor**: 引擎内核层拦截CompleteTaskCmd/SubmitTaskFormCmd，沟通中禁止审批
+5. **CommunicationCompleteGuardListener**: 任务 `complete` 事件兜底校验（不依赖命令内部字段），拦截器读不到 taskId 时仍能挡住
+6. **自定义实体**: BizTaskExt/BizCommSession/BizCommTask/BizTaskTransfer，实现DbEntity接口
+7. **自定义Manager(Session)**: 继承AbstractManager，通过DbSqlSession访问MyBatis
+8. **Mapper XML**: 遵循Camunda原生风格，statement id格式为insertEntity/updateEntity/deleteEntity/selectEntity
 
 ### 表结构
 - `BIZ_TASK_EXT_`: 主流程待办业务扩展表（存沟通状态）
 - `BIZ_COMM_SESSION_`: 沟通会话表
 - `BIZ_COMM_TASK_`: 沟通任务明细表（含三层关联字段，`SOURCE_TASK_DEF_KEY_` 直接记录发起节点 key）
+- `BIZ_TASK_TRANSFER_`: 待办转办记录表（引擎只保留当前办理人，转办链只能落在业务表）
+
+表结构与索引由 `src/main/resources/db/migration` 下的 Flyway 脚本管理，按版本递增，不再依赖手写 `schema.sql`。
+
+#### 按数据库方言维护
+
+Camunda 7.24 官方支持的 7 类库各有一个子目录，Flyway 通过 `locations=classpath:db/migration/{vendor}` 按实际连接自动选中，配置里不出现库名：
+
+| 目录 | 目标库 | 关键类型差异 |
+|---|---|---|
+| `h2/` | H2 2.2（演示与单测） | `CLOB` / `TIMESTAMP` |
+| `mysql/` `mariadb/` | MySQL 8.0 / MariaDB 10.6+ | `LONGTEXT` / `DATETIME(3)`（避开 2038 与时区漂移） |
+| `postgresql/` | PostgreSQL 12–16 | `TEXT`，表名不引号、由 PG 折叠小写 |
+| `oracle/` | Oracle 19c | `VARCHAR2(n CHAR)`、无 `IF NOT EXISTS` |
+| `sqlserver/` | SQL Server 2017/2019/2022 | `NVARCHAR(MAX)` / **`DATETIME2(3)`**（`TIMESTAMP` 是 rowversion） |
+| `db2/` | DB2 11.5 LUW | `VARCHAR(n OCTETS)` / `CODEUNITS32` |
+
+- `V1__baseline.sql` 只建 4 张表与主键/唯一约束；`V2__composite_indexes.sql` 建全部 16 个索引（9 单列 + 7 组合），7 个方言的列数与索引名必须逐一对齐；
+- 默认 profile（H2）关闭 Flyway，由 `sql.init` 顺序执行 `db/migration/h2/` 两个脚本——同一份 SQL 服务演示与迁移，避免两套结构漂移；
+- 正式库用 `--spring.profiles.active=prod`，连接信息走 `DB_URL` / `DB_USER` / `DB_PASSWORD` / `DB_DRIVER`，Flyway 自动迁移并关闭 `sql.init`；
+- 引擎表 `ACT_*` 不进入本目录：由 Camunda 自身 `schema-update` 或官方 DDL 管理，业务表不加外键。
+
 
 ### 关键设计原则
 - 沟通任务用`taskService.newTask()`创建，taskDefinitionKey=`源节点key#COMM`（如 `manager_review#COMM`），无executionId，完全旁路；据此可直接看出沟通由哪个流程节点发起
@@ -146,3 +194,5 @@ curl -X POST "http://localhost:8080/api/comm/demo/complete/$MGR_TASK_ID"
 - 所有写操作包装为引擎Command，融入引擎事务和乐观锁
 - 不依赖Spring事务管理，完全在引擎CommandContext内执行数据库操作
 - 前端按钮禁用仅为体验优化，后端拦截器做权限兜底
+- 审批锁定是两道防线：命令拦截器给出明确业务异常；任务 `complete` 监听器兜底，不依赖命令内部字段名，Camunda 升级后即使反射失效也不会被绕过
+- 转办不能只 `setAssignee`：引擎只保留当前办理人，`ASSIGNEE_` 会被覆盖，转办链必须落 `BIZ_TASK_TRANSFER_`
