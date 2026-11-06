@@ -8,10 +8,16 @@ spring:
     console:
       enabled: true
       path: /h2
+  flyway:
+    # 演示 / 单测走 H2：关闭 Flyway，由 sql.init 顺序执行 h2 方言脚本。
+    # 两个入口指向同一份 SQL，避免“schema.sql 与迁移脚本各写一遍、然后慢慢漂移”。
+    enabled: false
   sql:
     init:
       mode: always
-      schema-locations: classpath:schema.sql
+      schema-locations:
+        - classpath:db/migration/h2/V1__baseline.sql
+        - classpath:db/migration/h2/V2__composite_indexes.sql
 
 camunda.bpm:
   # Camunda 7.24 默认不再自动部署 classpath 下的 BPMN，需显式开启

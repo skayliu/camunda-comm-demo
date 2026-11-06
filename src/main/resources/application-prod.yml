@@ -1,0 +1,42 @@
+# ============================================================================
+# 正式库 profile：java -jar app.jar --spring.profiles.active=prod
+#
+# 连接信息全部来自环境变量，不落仓库：
+#   DB_URL      例：jdbc:postgresql://db:5432/camunda
+#                     jdbc:mysql://db:3306/camunda?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+#                     jdbc:oracle:thin:@//db:1521/ORCLPDB1
+#                     jdbc:sqlserver://db:1433;databaseName=camunda;encrypt=true
+#                     jdbc:db2://db:50000/camunda
+#   DB_USER / DB_PASSWORD / DB_DRIVER
+# ============================================================================
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    driver-class-name: ${DB_DRIVER}
+  sql:
+    # 正式库不再用 sql.init：它对 Oracle / SQL Server / DB2 不幂等，重复启动会直接报错
+    init:
+      mode: never
+  flyway:
+    enabled: true
+    # {vendor} 由 Flyway 按连接的实际数据库类型替换：
+    # h2 / mysql / mariadb / postgresql / oracle / sqlserver / db2
+    locations: classpath:db/migration/{vendor}
+    # 接管已有 Camunda 库时，库里已有 ACT_* 表但没有 flyway_schema_history，
+    # 不开 baseline 会报 "Found non-empty schema without schema history table"。
+    # baseline-version 必须是 0：保证 V1 仍然执行（baseline 只记录起点，不代替建表）。
+    baseline-on-migrate: true
+    baseline-version: 0
+    validate-on-migrate: true
+    # 业务脚本只在 CREATE TABLE 里声明主键，不建 ACT_* 表；
+    # 引擎表由 Camunda 自己的 schema-update 或官方 DDL 负责，两者互不越界。
+    table: flyway_schema_history
+
+camunda.bpm:
+  database:
+    # 首次部署保持 true 让引擎建 ACT_* 表；表建好后由 DBA 改成 false，
+    # 并把官方 database/*.sql 纳入发布流程，避免引擎在启动时隐式改结构。
+    schema-update: ${CAMUNDA_SCHEMA_UPDATE:true}
+  history-level: full
