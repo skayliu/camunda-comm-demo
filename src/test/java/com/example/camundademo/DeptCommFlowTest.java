@@ -663,6 +663,42 @@ class DeptCommFlowTest {
         assertEquals(2, stats.get("commTotal"), "跟踪图统计应包含部门沟通: " + stats);
         assertEquals(2, stats.get("commPending"), "两条沟通都待反馈: " + stats);
 
+        // 下钻：部门沟通是业务侧 startProcessInstanceByKey 启动的独立实例，
+        // 引擎的 CALL_PROC_INST_ID_ 为空，只按历史活动收集永远拿不到它。
+        // 必须由 DEPT_PROC_INST_ID_ 并入 calledInstances，前端才有下钻入口。
+        List<Map<String, Object>> called = (List<Map<String, Object>>) node.get("calledInstances");
+        assertNotNull(called, "节点缺少 calledInstances: " + node);
+        String deptPid = (String) deptComm.get("deptProcInstId");
+        Map<String, Object> drill = called.stream()
+                .filter(c -> deptPid.equals(c.get("processInstanceId")))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "部门沟通实例未进入下钻列表: " + deptPid + " / " + called));
+        assertEquals("deptComm", drill.get("source"), "下钻来源应标为部门沟通: " + drill);
+        assertEquals(DEPT_IT_NAME, drill.get("targetName"), "下钻项应带部门名: " + drill);
+        assertEquals("RUNNING", drill.get("state"), "待反馈的部门子流程应为进行中: " + drill);
+        assertEquals(deptPid, node.get("calledProcessInstanceId"));
+
+        // 父流程的发起人不是部门子流程的办理人，父子关系也不在引擎表里，
+        // 不沿 BIZ_COMM_TASK_ 回溯就会在下钻时 403。
+        assertTrue(processTraceService.canView(deptPid, "applicant"),
+                "父流程发起人必须能下钻查看部门沟通实例");
+        assertTrue(processTraceService.canView(deptPid, "alice"),
+                "部门成员（未认领时是候选人）必须能查看本部门的子流程");
+
+        // 反向入口：部门子流程从待办直接打开时没有下钻栈，必须能从业务记录回溯到父实例，
+        // 否则用户在子流程里没有“返回上级”，只能关掉弹窗自己找回去。
+        // 父子关系不在引擎表（CALL_PROC_INST_ID_ 为空），这里同时钉住回溯来源与发起节点。
+        Map<String, Object> deptTrace = processTraceService.trace(deptPid);
+        assertEquals(pid, deptTrace.get("parentProcessInstanceId"),
+                "部门子流程应回溯到发起沟通的主实例: " + deptTrace.get("parentProcessInstanceId"));
+        assertEquals("deptComm", deptTrace.get("parentSource"),
+                "父实例来源应标为部门沟通: " + deptTrace.get("parentSource"));
+        assertEquals("manager_review", deptTrace.get("parentActivityId"),
+                "应带出发起沟通的节点，前端才能提示来自哪一步: " + deptTrace.get("parentActivityId"));
+        assertNotNull(deptTrace.get("parentProcessTitle"),
+                "父实例应带可读标题，面包屑不能是空白: " + deptTrace);
+
         // 明细表“只看有沟通的节点”依赖 commTasks，非空即会被保留；
         // 同时开启筛选时该节点必须仍在结果里（由同一份数据驱动，不单独断言前端口径）
         assertEquals(Boolean.TRUE, node.get("commLocked"), "有待反馈沟通时节点应处于锁定态: " + node);

@@ -47,6 +47,20 @@
           </span>
           <span class="trace-drill-tip">第 {{ drillTrail.length }} 层子流程</span>
         </div>
+        <!-- 从待办 / 实例列表直接打开的子流程实例：没有下钻栈，但父实例仍然存在。
+             不给反向入口时，用户只能关掉弹窗回去找，等于“进了子流程就出不来”。 -->
+        <div v-else-if="data.parentProcessInstanceId" class="trace-drill-bar is-parent-entry">
+          <a-button type="link" size="small" class="trace-drill-back" @click="backToParent">
+            <template #icon><ArrowLeftOutlined /></template>
+            返回上级流程
+          </a-button>
+          <span class="trace-drill-path">
+            <a class="trace-drill-crumb" @click="backToParent">{{ parentLabel }}</a>
+            <span class="trace-drill-sep">/</span>
+            <span class="trace-drill-current">{{ data.processTitle }}</span>
+          </span>
+          <span class="trace-drill-tip">{{ parentEntryTip }}</span>
+        </div>
         <!-- 概览 + 工具栏 + 流程图：可整体收起，把高度让给节点执行明细 -->
         <div v-show="!collapsed" class="trace-top">
         <!-- 概览 -->
@@ -786,9 +800,10 @@
               {{ tipNode.comments[tipNode.comments.length - 1].message }}
             </div>
             <div v-if="tipNode.calledInstances && tipNode.calledInstances.length" class="trace-tip-row">
-              <span>调用子流程</span>
+              <span>子流程实例</span>
               <b>
                 {{ tipNode.calledInstances.length }} 个
+                <template v-if="deptDrillCount(tipNode)">· 部门沟通 {{ deptDrillCount(tipNode) }}</template>
                 <span class="trace-tip-drill">点击右下角 ↘ 或 + 下钻</span>
               </b>
             </div>
@@ -993,9 +1008,13 @@
                     </div>
 
                     <!-- camundaTaskId 存沟通旁路任务ID；deptProcInstId 存部门沟通子流程实例ID。
-                         沟通对象为部门时才有后者，空值表示这条沟通不是部门沟通。 -->
+                         沟通对象为部门时才有后者，空值表示这条沟通不是部门沟通。
+                         这里直接给入口：沟通条目就是“这一趟沟通”，比回图上找节点更快。 -->
                     <div v-if="item.deptProcInstId" class="trace-comm-waiting is-muted">
-                      部门流转实例：{{ item.deptProcInstId }}
+                      部门沟通实例：{{ shortId(item.deptProcInstId) }}
+                      <a class="trace-drill-link" @click.stop="drillToInstance(item.deptProcInstId, '部门沟通 · ' + (item.targetName || '部门'))">
+                        查看沟通流程
+                      </a>
                     </div>
                   </div>
                 </div>
@@ -1031,7 +1050,12 @@
           <div class="trace-child-main">
             <span class="trace-child-name">
               {{ item.processTitle || item.processDefinitionName || '子流程' }}
+              <span v-if="item.source === 'deptComm' && item.targetName" class="trace-child-dept">
+                · {{ item.targetName }}
+              </span>
             </span>
+            <a-tag v-if="item.source === 'deptComm'" color="blue">部门沟通</a-tag>
+            <a-tag v-else-if="item.source === 'callActivity'" color="geekblue">调用活动</a-tag>
             <a-tag :color="item.state === 'RUNNING' ? 'processing' : 'green'">
               {{ item.state === 'RUNNING' ? '进行中' : '已完成' }}
             </a-tag>
@@ -1092,6 +1116,17 @@ const delegations = ref([])
 const currentPid = ref('')
 // 下钻栈：每层记录上一级实例，用于面包屑与「返回上级」
 const drillTrail = ref([])
+// 直接打开子流程（无下钻栈）时的父实例标题：优先流程标题，退化为流程定义名
+const parentLabel = computed(
+  () =>
+    data.value?.parentProcessTitle ||
+    data.value?.parentProcessDefinitionName ||
+    '上级流程'
+)
+// 父实例来源说明：部门沟通是业务侧独立启动，靠业务记录回溯父实例，提示语要区分开
+const parentEntryTip = computed(() =>
+  data.value?.parentSource === 'deptComm' ? '由上级流程的沟通发起' : '上级流程调起的子流程'
+)
 // 一个调用活动调起多个子实例时的选择弹窗
 const childPickerOpen = ref(false)
 const childPickerNodeName = ref('')
@@ -2662,11 +2697,11 @@ function hideTip() {
 
 // ===== 调用子流程下钻 =====
 
-// 只有真正被调用过、且引擎记录了子实例 ID 的调用活动才可下钻。
-// 未执行 / 无历史记录的调用活动仍然保留 + 号（BPMN 语义），但点击只提示原因。
+// 有下钻目标的节点才可点。
+// 不能只认 callActivity：部门沟通是业务侧独立启动的 dept_communication 实例，
+// 它挂在普通节点（userTask）上，引擎不会把它记成调用活动。
 function canDrill(node) {
   return !!node
-    && node.type === 'callActivity'
     && Array.isArray(node.calledInstances)
     && node.calledInstances.length > 0
 }
@@ -2704,8 +2739,8 @@ function drillDown(node) {
   if (!canDrill(node)) {
     message.info(
       node && node.status === 'PENDING'
-        ? '该调用活动尚未执行，暂无可下钻的子流程实例'
-        : '该调用活动没有可下钻的子流程实例'
+        ? '该节点尚未执行，暂无可下钻的子流程实例'
+        : '该节点没有可下钻的子流程实例'
     )
     return
   }
@@ -2736,12 +2771,37 @@ function enterChild(item, nodeName) {
   load()
 }
 
+// 从沟通条目直接进入该条部门沟通的子流程实例。
+// 沟通条目本身就是“这一趟沟通”的落点，比让用户再到图上找节点更直接。
+function drillToInstance(pid, nodeName) {
+  if (!pid) return
+  enterChild({ processInstanceId: pid }, nodeName || '部门沟通')
+}
+
+// 节点下钻目标里有多少个部门沟通实例：悬停与选择列表据此区分来源
+function deptDrillCount(node) {
+  return (node?.calledInstances || []).filter((item) => item.source === 'deptComm').length
+}
+
 // 返回上一级：弹出栈顶实例重新加载
 function drillUp() {
   if (!drillTrail.value.length) return
   const previous = drillTrail.value[drillTrail.value.length - 1]
   drillTrail.value = drillTrail.value.slice(0, -1)
   currentPid.value = previous.processInstanceId
+  hideTip()
+  load()
+}
+
+// 直接从待办 / 列表打开子流程时的反向入口：当前实例的父级来自后端回溯
+// （callActivity 取 superProcessInstanceId，部门沟通取业务记录里的源任务所在实例）。
+// 这里没有下钻栈可弹，直接把 currentPid 换成父实例；回到父级后若要再进这个子流程，
+// 从父流程节点上的下钻入口重新进入即可。
+function backToParent() {
+  const pid = data.value?.parentProcessInstanceId
+  if (!pid) return
+  drillTrail.value = []
+  currentPid.value = pid
   hideTip()
   load()
 }
@@ -2981,6 +3041,14 @@ onBeforeUnmount(() => {
   margin-left: auto;
   color: rgba(0, 0, 0, 0.35);
 }
+/* 直接打开子流程时的父级入口：与下钻面包屑同一形态，用淡橙区分「不是下钻来的」 */
+.trace-drill-bar.is-parent-entry {
+  border-color: #ffe0b2;
+  background: #fffaf0;
+}
+.trace-drill-bar.is-parent-entry .trace-drill-crumb {
+  color: #d46b08;
+}
 /* 子实例选择弹窗 */
 .trace-child-tip {
   margin-bottom: 10px;
@@ -3012,6 +3080,11 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 部门沟通的下钻项：部门名跟在流程名后面，弱化显示，避免与流程名抢注意力 */
+.trace-child-dept {
+  font-weight: 400;
+  color: rgba(0, 0, 0, 0.45);
 }
 .trace-child-meta {
   margin-top: 4px;

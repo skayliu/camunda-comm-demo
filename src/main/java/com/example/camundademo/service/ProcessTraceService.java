@@ -207,6 +207,15 @@ public class ProcessTraceService {
                 .count() > 0) {
             return true;
         }
+        // 部门沟通的 dept_handle 是候选组任务（candidateGroups=${deptId}），未认领时
+        // 历史任务上没有 assignee。部门成员在待办里看得到、点开跟踪图却会被判 403，
+        // 因此候选人与办理人享受同一可见范围。
+        if (taskService.createTaskQuery()
+                .processInstanceId(processInstanceId)
+                .taskCandidateUser(userId)
+                .count() > 0) {
+            return true;
+        }
         if (depth >= MAX_CALL_DEPTH) {
             return false;
         }
@@ -216,7 +225,107 @@ public class ProcessTraceService {
                 return true;
             }
         }
+        // 部门沟通是业务侧独立启动的实例，父子关系不在引擎表里，只在
+        // BIZ_COMM_TASK_.DEPT_PROC_INST_ID_ 上。不沿业务记录找回发起沟通的实例，
+        // 父流程里点下钻同样会 403。
+        for (String parentId : commParentProcessInstanceIds(hpi)) {
+            if (canView(parentId, userId, depth + 1)) {
+                return true;
+            }
+        }
         return false;
+    }
+
+    /**
+     * 部门沟通子流程的业务父实例。
+     *
+     * <p>部门沟通不是 callActivity 调起的，{@code getSuperProcessInstanceId()} 为空；
+     * 唯一的父子线索是业务记录的 businessKey（= BIZ_COMM_TASK_.ID_）与
+     * {@code SOURCE_TASK_ID_}。由此反查发起沟通的那个历史任务，再取其所属流程实例。</p>
+     *
+     * <p>源任务被删除（沟通已收回）时查不到，此时退化为“不继承权限”，不影响其它判定。</p>
+     */
+    private List<String> commParentProcessInstanceIds(HistoricProcessInstance hpi) {
+        if (hpi == null || hpi.getBusinessKey() == null || hpi.getBusinessKey().isBlank()) {
+            return Collections.emptyList();
+        }
+        try {
+            BizCommTask record = communicationService.getCommRecordById(hpi.getBusinessKey());
+            if (record == null || record.getSourceTaskId() == null) {
+                return Collections.emptyList();
+            }
+            HistoricTaskInstance sourceTask = historyService.createHistoricTaskInstanceQuery()
+                    .taskId(record.getSourceTaskId()).singleResult();
+            if (sourceTask == null || sourceTask.getProcessInstanceId() == null
+                    || sourceTask.getProcessInstanceId().equals(hpi.getId())) {
+                return Collections.emptyList();
+            }
+            return List.of(sourceTask.getProcessInstanceId());
+        } catch (RuntimeException ex) {
+            LOG.warn("按沟通记录回溯父实例失败，businessKey=" + hpi.getBusinessKey(), ex);
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * 当前实例的父实例引用，供前端呈现「返回上级流程」。
+     *
+     * <p>两条父子链路：</p>
+     * <ul>
+     *   <li>callActivity 调起的子流程：{@code superProcessInstanceId} 直接有值；</li>
+     *   <li>部门沟通子流程：由 {@code startProcessInstanceByKey} 独立启动，引擎里没有父子关系，
+     *       只能沿 {@code BIZ_COMM_TASK_.SOURCE_TASK_ID_} 找回发起沟通的那个历史任务，
+     *       再取其所属流程实例。并发起节点（{@code activityId}）也一并带回，
+     *       前端可显示“来自 xxx 节点的沟通”。</li>
+     * </ul>
+     *
+     * <p>父实例已被清理时返回空 map：前端不显示入口，避免点进去只得到“流程实例不存在”。</p>
+     */
+    private Map<String, Object> parentInstanceRef(HistoricProcessInstance hpi) {
+        if (hpi == null) {
+            return Collections.emptyMap();
+        }
+        String parentId = hpi.getSuperProcessInstanceId();
+        String activityId = null;
+        String source = SOURCE_CALL_ACTIVITY;
+        if (parentId == null) {
+            String businessKey = hpi.getBusinessKey();
+            if (businessKey == null || businessKey.isBlank()) {
+                return Collections.emptyMap();
+            }
+            try {
+                BizCommTask record = communicationService.getCommRecordById(businessKey);
+                if (record == null || record.getSourceTaskId() == null) {
+                    return Collections.emptyMap();
+                }
+                HistoricTaskInstance sourceTask = historyService.createHistoricTaskInstanceQuery()
+                        .taskId(record.getSourceTaskId()).singleResult();
+                if (sourceTask == null || sourceTask.getProcessInstanceId() == null
+                        || sourceTask.getProcessInstanceId().equals(hpi.getId())) {
+                    return Collections.emptyMap();
+                }
+                parentId = sourceTask.getProcessInstanceId();
+                activityId = sourceTask.getTaskDefinitionKey();
+                source = SOURCE_DEPT_COMM;
+            } catch (RuntimeException ex) {
+                // 业务记录缺失或源任务已删除（沟通被收回）时不阻断跟踪图，只是没有返回入口
+                LOG.warn("回溯父实例失败，businessKey=" + businessKey, ex);
+                return Collections.emptyMap();
+            }
+        }
+        HistoricProcessInstance parent = historyService.createHistoricProcessInstanceQuery()
+                .processInstanceId(parentId).singleResult();
+        if (parent == null) {
+            return Collections.emptyMap();
+        }
+        ProcessDefinition parentDef = definition(parent.getProcessDefinitionId());
+        Map<String, Object> ref = new LinkedHashMap<>();
+        ref.put("processInstanceId", parentId);
+        ref.put("processTitle", processTitle(parent));
+        ref.put("processDefinitionName", parentDef == null ? null : parentDef.getName());
+        ref.put("activityId", activityId);
+        ref.put("source", source);
+        return ref;
     }
 
     /**
@@ -613,6 +722,11 @@ public class ProcessTraceService {
             // 被调用实例的 startUserId 也常常为空，靠它反推不可行。
             // 同一个调用活动可能执行多次（循环 / 多实例），因此返回列表，前端据此选择要下钻的实例。
             List<Map<String, Object>> calledInstances = calledInstances(instances);
+            // 部门沟通走的是业务侧独立启动的 dept_communication 实例，引擎不会在
+            // CALL_PROC_INST_ID_ 上留下父子关系，单靠历史活动永远拿不到它。
+            // 实例 ID 本来就存在沟通记录上（DEPT_PROC_INST_ID_），并进同一份下钻列表，
+            // 前端沿用现有的徽标 / 面包屑 / 多实例选择，不必再写第二套下钻。
+            mergeDeptCommInstances(calledInstances, commTasks);
             node.put("calledInstances", calledInstances);
             node.put("calledProcessInstanceId", calledInstances.isEmpty()
                     ? null : calledInstances.get(0).get("processInstanceId"));
@@ -671,8 +785,15 @@ public class ProcessTraceService {
         result.put("processDefinitionName", pd == null ? null : pd.getName());
         result.put("processTitle", processTitle(hpi));
         result.put("state", hpi.getEndTime() == null ? "RUNNING" : "FINISHED");
-        // 子流程实例可能被直接打开（刷新页面、分享链接），带上父实例便于前端提示“返回上级”
-        result.put("parentProcessInstanceId", hpi.getSuperProcessInstanceId());
+        // 子流程实例可能被直接打开（刷新页面、从待办/列表进来），带上父实例前端才能给“返回上级”。
+        // callActivity 的父子关系在 superProcessInstanceId 上；部门沟通是业务侧 startProcessInstanceByKey
+        // 独立启动的，引擎表里没有父子关系，只能沿 BIZ_COMM_TASK_.SOURCE_TASK_ID_ 回溯。
+        Map<String, Object> parentRef = parentInstanceRef(hpi);
+        result.put("parentProcessInstanceId", parentRef.get("processInstanceId"));
+        result.put("parentProcessTitle", parentRef.get("processTitle"));
+        result.put("parentProcessDefinitionName", parentRef.get("processDefinitionName"));
+        result.put("parentActivityId", parentRef.get("activityId"));
+        result.put("parentSource", parentRef.get("source"));
         result.put("startUserId", hpi.getStartUserId());
         result.put("startTime", hpi.getStartTime());
         result.put("endTime", hpi.getEndTime());
@@ -765,9 +886,69 @@ public class ProcessTraceService {
             item.put("endTime", child.getEndTime());
             item.put("durationInMillis", child.getDurationInMillis());
             item.put("deleteReason", child.getDeleteReason());
+            // 来源决定前端文案：调用活动是 BPMN 语义，部门沟通是业务侧启动的子流程实例
+            item.put("source", SOURCE_CALL_ACTIVITY);
             result.put(calledId, item);
         }
         return new ArrayList<>(result.values());
+    }
+
+    /** 下钻实例来源：BPMN 调用活动 */
+    private static final String SOURCE_CALL_ACTIVITY = "callActivity";
+    /** 下钻实例来源：业务侧启动的部门沟通子流程 */
+    private static final String SOURCE_DEPT_COMM = "deptComm";
+
+    /**
+     * 把部门沟通子流程实例并入节点的下钻列表。
+     *
+     * <p>部门沟通由 {@code CommTaskFactory} 用 {@code startProcessInstanceByKey} 独立启动，
+     * 不是 callActivity，因此 {@code ACT_HI_ACTINST.CALL_PROC_INST_ID_} 为空，
+     * 按历史活动收集永远收不到它——这正是跟踪图上「部门沟通」节点没有下钻入口的原因。</p>
+     *
+     * <p>实例 ID 已经落在业务记录 {@code DEPT_PROC_INST_ID_} 上，直接取用即可，
+     * 不需要新增父子表，也不用回填历史数据：存量记录本来就有这一列。</p>
+     */
+    private void mergeDeptCommInstances(List<Map<String, Object>> target,
+                                        List<Map<String, Object>> commTasks) {
+        Set<String> seen = new HashSet<>();
+        for (Map<String, Object> item : target) {
+            seen.add(String.valueOf(item.get("processInstanceId")));
+        }
+        for (Map<String, Object> comm : commTasks) {
+            Object raw = comm.get("deptProcInstId");
+            if (raw == null) {
+                continue;
+            }
+            String deptInstId = String.valueOf(raw);
+            if (deptInstId.isBlank() || !seen.add(deptInstId)) {
+                continue;
+            }
+            HistoricProcessInstance child = historyService.createHistoricProcessInstanceQuery()
+                    .processInstanceId(deptInstId).singleResult();
+            if (child == null) {
+                // 实例被物理清理（老库、手工删数据）时无图可下钻；保留沟通记录本身即可
+                LOG.debug("部门沟通实例不存在，跳过下钻，processInstanceId=" + deptInstId);
+                continue;
+            }
+            ProcessDefinition childDefinition = definition(child.getProcessDefinitionId());
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("processInstanceId", child.getId());
+            item.put("processDefinitionKey", child.getProcessDefinitionKey());
+            item.put("processDefinitionName", childDefinition == null
+                    ? "部门沟通子流程" : childDefinition.getName());
+            item.put("processTitle", childDefinition == null
+                    ? "部门沟通子流程" : childDefinition.getName());
+            item.put("state", child.getEndTime() == null ? "RUNNING" : "FINISHED");
+            item.put("startTime", child.getStartTime());
+            item.put("endTime", child.getEndTime());
+            item.put("durationInMillis", child.getDurationInMillis());
+            item.put("deleteReason", child.getDeleteReason());
+            item.put("source", SOURCE_DEPT_COMM);
+            // 前端在选择列表里用部门名区分“给谁发的这一趟沟通”
+            item.put("commTaskId", comm.get("taskId"));
+            item.put("targetName", comm.get("targetName"));
+            target.add(item);
+        }
     }
 
     private List<String> activeNodeNames(List<Map<String, Object>> nodes, List<String> activeIds) {
@@ -1099,7 +1280,7 @@ public class ProcessTraceService {
         vo.put("parentCommTaskId", record == null ? null : record.getParentCommTaskId());
         vo.put("rootTaskId", record == null ? null : record.getRootTaskId());
         // 沟通旁路任务ID 读 CAMUNDA_TASK_ID_；DEPT_PROC_INST_ID_ 是部门子流程实例ID，
-        // 仅 TARGET_TYPE_ = DEPT 时有值，按 deptProcInstId 原样外发，前端据此展示部门流转实例。
+        // 仅 TARGET_TYPE_ = DEPT 时有值，按 deptProcInstId 原样外发，前端据此展示部门沟通实例。
         vo.put("camundaTaskId", record == null ? null : record.getCamundaTaskId());
         vo.put("deptProcInstId", record == null ? null : record.getDeptProcInstId());
         vo.put("status", bizStatus);
