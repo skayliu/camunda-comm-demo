@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS BIZ_COMM_TASK_ (
     WITHDRAW_TIME_ TIMESTAMP,
     -- 沟通旁路任务 ID：收回 / 反馈 / 待办反查的唯一关联键
     CAMUNDA_TASK_ID_ VARCHAR(64),
-    -- 部门沟通子流程实例 ID：预留给 DEPT 类型，当前恒为 NULL
+    -- 部门沟通子流程实例 ID：TARGET_TYPE_ = DEPT 时写入，收回与主流程结束级联终止据此定位整个子流程
     DEPT_PROC_INST_ID_ VARCHAR(64),
     CREATE_TIME_ TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT PK_BIZ_COMM_TASK_ PRIMARY KEY (ID_)

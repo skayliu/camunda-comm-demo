@@ -18,6 +18,16 @@
       </div>
     </template>
 
+    <!-- 加载失败要单独成态：task 为空时下方所有 v-if 都不成立，
+         抽屉会只剩“空白 + 底部审批按钮”，看起来像办理界面，实际是详情没取到 -->
+    <div v-if="loadError && !loaded" class="drawer-section">
+      <a-result status="warning" :title="loadError">
+        <template #extra>
+          <a-button @click="load">重新加载</a-button>
+        </template>
+      </a-result>
+    </div>
+
     <template v-if="loaded">
       <!-- 基本信息 -->
       <div class="drawer-section">
@@ -307,6 +317,9 @@
     <template #footer>
       <a-button @click="close">关闭</a-button>
 
+      <!-- 详情没取到时不渲染任何操作按钮：否则 isCommTask 为空会走到审批分支，
+           出现“发起沟通 / 通过审批”，把权限问题伪装成办理界面 -->
+      <template v-if="loaded">
         <template v-if="task.isCommTask">
           <a-button
             v-if="task.myCommStatus === 'PENDING' && canForward"
@@ -376,6 +389,7 @@
             </a-button>
           </a-tooltip>
         </template>
+      </template>
     </template>
 
     <!-- 发起 / 继续沟通 -->
@@ -409,7 +423,7 @@
           <a-select
             v-model:value="commForm.targets"
             mode="multiple"
-            placeholder="选择需要反馈的人员"
+            placeholder="选择需要反馈的人员或部门"
             :options="commModal.mode === 'forward' ? forwardOptions : targetOptions"
             :filter-option="filterOption"
             :max-tag-count="4"
@@ -464,6 +478,8 @@ const emit = defineEmits(['update:open', 'refresh'])
 
 const loading = ref(false)
 const loaded = ref(false)
+// 加载失败的原因：保留下来渲染成错误态，而不是只弹一条提示后留个空抽屉
+const loadError = ref('')
 const submitting = ref(false)
 const task = ref({})
 const approveComment = ref('')
@@ -666,6 +682,9 @@ const commForm = reactive({ targets: [], content: '' })
 const commSubmitting = ref(false)
 const targetOptions = ref([])
 const targetNames = ref({})
+// 沟通对象类型：人员 USER / 部门 DEPT。部门走独立子流程，id 是部门组ID，
+// 提交时必须带上正确类型，否则后端会把它当成一个不存在的账号。
+const targetTypes = ref({})
 
 function filterOption(input, option) {
   return (option.label || '').toLowerCase().includes(input.toLowerCase())
@@ -718,6 +737,12 @@ async function load() {
   if (!props.taskId) return
   loading.value = true
   loaded.value = false
+  // 不清掉上一条任务的数据，切换待办时会把上一条的 isCommTask / myCommStatus
+  // 带进新的一条，界面按错的类型渲染
+  task.value = {}
+  comm.value = {}
+  commSelf.value = {}
+  loadError.value = ''
   try {
     const data = await wbApi.taskDetail(props.taskId)
     task.value = data
@@ -727,7 +752,8 @@ async function load() {
     approveComment.value = ''
     loaded.value = true
   } catch (e) {
-    message.error(errorText(e))
+    // 不弹 toast：错误已经渲染进抽屉，弹窗关掉后仍会留下一个空白抽屉
+    loadError.value = errorText(e)
   } finally {
     loading.value = false
   }
@@ -736,12 +762,31 @@ async function load() {
 async function ensureTargets() {
   if (targetOptions.value.length) return
   try {
-    const list = await commApi.targets('')
-    targetOptions.value = list.map((u) => ({
+    const [users, departments] = await Promise.all([
+      commApi.targets(''),
+      commApi.departments('')
+    ])
+    const userOptions = users.map((u) => ({
       value: u.id,
-      label: `${u.name}（${u.id}）`
+      label: `${u.name}（${u.id}）`,
+      type: 'USER',
+      name: u.name
     }))
-    targetNames.value = Object.fromEntries(list.map((u) => [u.id, u.name]))
+    // 部门选项单独标注“部门 · N 人”：选部门代表整个部门承接，
+    // 部门内任意成员认领后反馈，不是指定某一个人。
+    const deptOptions = departments.map((d) => ({
+      value: d.id,
+      label: `${d.name}（部门 · ${d.memberCount || 0} 人）`,
+      type: 'DEPT',
+      name: d.name
+    }))
+    targetOptions.value = [...userOptions, ...deptOptions]
+    targetNames.value = Object.fromEntries(
+      targetOptions.value.map((o) => [o.value, o.name])
+    )
+    targetTypes.value = Object.fromEntries(
+      targetOptions.value.map((o) => [o.value, o.type])
+    )
   } catch (e) {
     message.error(errorText(e))
   }
@@ -789,7 +834,7 @@ async function openForward() {
 
 function buildTargets() {
   return commForm.targets.map((id) => ({
-    type: 'USER',
+    type: targetTypes.value[id] || 'USER',
     id,
     name: targetNames.value[id] || id
   }))

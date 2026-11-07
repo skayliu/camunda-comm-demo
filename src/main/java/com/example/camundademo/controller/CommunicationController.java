@@ -66,8 +66,7 @@ public class CommunicationController {
     /** 可选沟通对象（前端选择器用）：只返回账号与显示名，不暴露密码等敏感信息 */
     @GetMapping("/targets")
     public List<Map<String, Object>> targets(@RequestParam(required = false) String keyword,
-                                             Authentication authentication) {
-        String currentUser = CurrentUser.require(authentication);
+                                             Authentication authentication) {        String currentUser = CurrentUser.require(authentication);
         String kw = keyword == null ? "" : keyword.trim();
         List<Map<String, Object>> result = new ArrayList<>();
         List<org.camunda.bpm.engine.identity.User> users = identityService.createUserQuery()
@@ -80,6 +79,33 @@ public class CommunicationController {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", u.getId());
             m.put("name", u.getFirstName() == null ? u.getId() : u.getFirstName());
+            result.add(m);
+        }
+        return result;
+    }
+
+    /**
+     * 可选沟通部门（前端选择器用）：只返回类型为 DEPARTMENT 的组。
+     *
+     * <p>部门沟通是独立子流程，不是“把部门ID 当账号建一条旁路任务”——
+     * 后者部门里没有任何人的待办能收到它。因此选择器必须把部门单独提供给前端，
+     * 发起时以 {@code type=DEPT} 提交。</p>
+     */
+    @GetMapping("/departments")
+    public List<Map<String, Object>> departments(@RequestParam(required = false) String keyword,
+                                                 Authentication authentication) {
+        CurrentUser.require(authentication);
+        String kw = keyword == null ? "" : keyword.trim();
+        List<org.camunda.bpm.engine.identity.Group> groups = identityService.createGroupQuery()
+                .groupType("DEPARTMENT")
+                .groupNameLike("%" + kw + "%")
+                .listPage(0, 50);
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (org.camunda.bpm.engine.identity.Group g : groups) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", g.getId());
+            m.put("name", g.getName() == null ? g.getId() : g.getName());
+            m.put("memberCount", identityService.createUserQuery().memberOfGroup(g.getId()).count());
             result.add(m);
         }
         return result;

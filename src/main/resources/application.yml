@@ -34,6 +34,13 @@ camunda.bpm:
   database:
     schema-update: true
   history-level: full
+  generic-properties:
+    properties:
+      # 部门 ID 直接作为 Camunda 的 group id（dept_handle 用候选组承接）。
+      # 引擎默认白名单是 "[a-zA-Z0-9]+|camunda-admin"，会把 dept_it / dept_admin
+      # 这类带下划线的部门判为非法标识符而拒绝建组，导致部门无人可处理。
+      # 这里只放开组 ID 的规则，用户与租户仍沿用默认白名单。
+      groupResourceWhitelistPattern: "[a-zA-Z0-9_-]+|camunda-admin"
 
 server:
   port: 8080

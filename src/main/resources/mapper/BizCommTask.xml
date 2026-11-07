@@ -45,8 +45,25 @@
             REPLY_CONTENT_ = #{replyContent, jdbcType=CLOB},
             REPLY_USER_ID_ = #{replyUserId, jdbcType=VARCHAR},
             REPLY_TIME_ = #{replyTime, jdbcType=TIMESTAMP},
-            WITHDRAW_TIME_ = #{withdrawTime, jdbcType=TIMESTAMP}
+            WITHDRAW_TIME_ = #{withdrawTime, jdbcType=TIMESTAMP},
+            <!-- 任务ID 参与整行更新：部门沟通建单时取不到任务ID，命令提交后回填需要它。
+                 各调用点的实体都由 select 查出（resultMap 已映射该列），不会因缺省值把已有任务ID 写空。 -->
+            CAMUNDA_TASK_ID_ = #{camundaTaskId, jdbcType=VARCHAR}
         WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </update>
+
+    <!-- 回填沟通任务ID。
+         部门沟通子流程在同一个 Camunda 命令内启动，dept_handle 尚未 flush，
+         建单时拿不到任务ID；命令提交后再补写一次。
+         条件 CAMUNDA_TASK_ID_ IS NULL 保证幂等：已有任务ID 的记录不会被覆盖，
+         重复执行影响 0 行。
+
+         注意：这里必须走 SQL 直更，不能改实体后 merge（见 updateBizCommTask 的注释）。 -->
+    <update id="updateCamundaTaskId" parameterType="map">
+        UPDATE BIZ_COMM_TASK_
+        SET CAMUNDA_TASK_ID_ = #{camundaTaskId, jdbcType=VARCHAR}
+        WHERE ID_ = #{id, jdbcType=VARCHAR}
+          AND CAMUNDA_TASK_ID_ IS NULL
     </update>
 
     <delete id="deleteBizCommTask" parameterType="string">

@@ -97,7 +97,16 @@ public class WorkbenchController {
         // 委托中 ASSIGNEE_ 是受托人，但 OWNER_ 仍需能看到详情，否则委托人无法确认进度、也无法收回
         boolean currentAssignee = task.getAssignee() != null && task.getAssignee().equals(user);
         boolean delegationOwner = task.getOwner() != null && task.getOwner().equals(user);
-        if (!currentAssignee && !delegationOwner) {
+        // 部门沟通任务由候选组承接，未认领前 ASSIGNEE_ 为空。待办列表（listTodo）
+        // 会把「我能认领的部门沟通任务」一并列出，若这里只认 assignee，就会出现
+        // “列表里看得见、点开必 403、抽屉退化成审批界面”的情况。
+        // 因此可见范围必须与列表同一口径：当前办理人、委托原办理人、或该任务的候选人。
+        boolean candidate = !currentAssignee && !delegationOwner
+                && taskService.createTaskQuery()
+                        .taskId(taskId)
+                        .taskCandidateUser(user)
+                        .count() > 0;
+        if (!currentAssignee && !delegationOwner && !candidate) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "不能查看他人的待办");
         }
         return workbenchService.taskDetail(taskId, user);

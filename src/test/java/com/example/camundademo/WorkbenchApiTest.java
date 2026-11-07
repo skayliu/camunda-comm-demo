@@ -408,4 +408,48 @@ class WorkbenchApiTest {
         ApiResponse unauth = call(HttpMethod.GET, "/api/wb/todo", null, null);
         assertEquals(401, unauth.status(), "未认证应返回 401，实际: " + unauth.status());
     }
+
+    /**
+     * 流程办结后，「已办」列表的发起人不能变空。
+     *
+     * <p>已办的流程实例已经结束，{@code runtimeService.getVariables} 取不到变量，
+     * 只读流程变量 applicant 的实现在这里会整列显示为空。发起人必须能回退到
+     * 历史变量或实例的 {@code START_USER_ID_}，否则同一个任务在待办里有发起人、
+     * 办完进了已办就没了。</p>
+     */
+    @Test
+    void doneListKeepsApplicantAfterProcessEnds() {
+        ensureDemoUser("applicant");
+        ensureDemoUser("manager");
+        ensureDemoUser("finance");
+
+        Map<String, Object> started = post("/api/comm/demo/start", null, "applicant");
+        String pid = (String) started.get("processInstanceId");
+        assertNotNull(pid, "启动流程失败: " + started);
+
+        String applyTaskId = (String) findInPage(
+                get("/api/wb/todo?type=all&page=1&size=50", "applicant"), pid).get("taskId");
+        post("/api/comm/demo/complete/" + applyTaskId, null, "applicant");
+
+        String managerTaskId = (String) findInPage(
+                get("/api/wb/todo?type=all&page=1&size=50", "manager"), pid).get("taskId");
+        post("/api/comm/demo/complete/" + managerTaskId, null, "manager");
+
+        String financeTaskId = (String) findInPage(
+                get("/api/wb/todo?type=all&page=1&size=50", "finance"), pid).get("taskId");
+        post("/api/comm/demo/complete/" + financeTaskId, null, "finance");
+
+        Map<String, Object> managerDone = get("/api/wb/done?page=1&size=50", "manager");
+        Map<String, Object> doneItem = findInPage(managerDone, pid);
+        assertNotNull(doneItem, "经理已办中未找到已办结流程: " + listOf(managerDone));
+        assertEquals("applicant", doneItem.get("applicant"),
+                "流程结束后已办列表的发起人应回退到历史变量/START_USER_ID_，实际: " + doneItem);
+
+        Map<String, Object> startedItem = findInPage(
+                get("/api/wb/started?page=1&size=50", "applicant"), pid);
+        assertNotNull(startedItem, "我的发起中未找到已办结流程");
+        assertEquals("FINISHED", startedItem.get("state"));
+        assertEquals("applicant", startedItem.get("applicant"),
+                "已结束流程在「我的发起」里的发起人不应为空: " + startedItem);
+    }
 }

@@ -9,6 +9,7 @@ import com.example.camundademo.persistence.BizTaskExtManager;
 import org.camunda.bpm.engine.ProcessEngine;
 import org.camunda.bpm.engine.TaskService;
 import org.camunda.bpm.engine.impl.cfg.ProcessEngineConfigurationImpl;
+import org.camunda.bpm.engine.impl.identity.Authentication;
 import org.camunda.bpm.engine.impl.interceptor.Command;
 import org.camunda.bpm.engine.task.Task;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,6 +40,9 @@ public class CommStateService {
 
     @Autowired
     private ProcessEngine processEngine;
+
+    @Autowired
+    private DeptCommProcessService deptCommProcessService;
 
     private ProcessEngineConfigurationImpl getEngineConfig() {
         return (ProcessEngineConfigurationImpl) processEngine.getProcessEngineConfiguration();
@@ -147,10 +151,16 @@ public class CommStateService {
                 ct.setWithdrawTime(withdrawnAt);
                 taskMgr.update(ct);
                 withdrawn++;
-                // 删除对应的Camunda沟通任务（cascade=true级联删除子任务）
-                String camundaTaskId = ct.getCamundaTaskId();
-                if (camundaTaskId != null) {
-                    taskService.deleteTask(camundaTaskId, true);
+                // 删除/终止对应的引擎待办：
+                // 部门沟通不是旁路任务，必须结束整个子流程实例；只删 dept_handle
+                // 会让子流程停在“无任务”状态，成为永远不会结束的孤儿实例。
+                if (ct.getDeptProcInstId() != null) {
+                    deptCommProcessService.cancel(ct.getDeptProcInstId(), "发起人收回部门沟通");
+                } else {
+                    String camundaTaskId = ct.getCamundaTaskId();
+                    if (camundaTaskId != null) {
+                        taskService.deleteTask(camundaTaskId, true);
+                    }
                 }
             }
 
@@ -215,6 +225,12 @@ public class CommStateService {
 
             BizCommTask ct = taskMgr.findById(commTaskRecordId);
             if (ct == null) throw new BusinessException("沟通任务不存在");
+            // 部门沟通：接收人是整个部门，不能按 targetId 与 userId 相等来校验。
+            // 部门成员认领 dept_handle 后提交意见，由子流程监听器回写业务表与解锁。
+            if (BizCommTask.TARGET_DEPT.equals(ct.getTargetType())) {
+                replyDeptCommTask(ct, userId, replyContent, taskMgr);
+                return null;
+            }
             // 身份校验：只有该条沟通的接收人本人可反馈，杜绝代填/伪造反馈
             if (userId == null || !userId.equals(ct.getTargetId())) {
                 throw new BusinessException("仅沟通对象本人可反馈该条沟通");
@@ -263,7 +279,9 @@ public class CommStateService {
                     if (!opinion.isEmpty()) {
                         // createComment 的第二个参数是流程实例ID（不是 userId）。
                         // 这里传旁路任务所属流程实例，意见才能按流程/任务双向查回。
-                        taskService.createComment(camundaTaskId, commTask.getProcessInstanceId(), opinion);
+                        // 评论作者取自 Camunda 的认证上下文，不是方法入参：
+                        // 不显式设置时 ACT_HI_COMMENT_.USER_ID_ 落 null，「意见/沟通」列查不到是谁写的。
+                        createCommentAs(userId, camundaTaskId, commTask.getProcessInstanceId(), opinion);
                     }
                     // ② 办结任务：任务为 standalone（newTask 创建、无 executionId），
                     //    complete 只结束该旁路待办并写入历史（DELETE_REASON_ 为 null），
@@ -291,5 +309,80 @@ public class CommStateService {
             }
             return null;
         });
+    }
+
+    /**
+     * 部门沟通的反馈：部门内任意成员认领子流程任务后提交意见。
+     *
+     * <p>业务表不在本方法里直接写：完成 {@code dept_handle} 会触发
+     * {@link com.example.camundademo.listener.DeptCommReplyListener}，
+     * 由它统一回写反馈内容、反馈人与解锁逻辑。两边都写会出现“谁后写谁生效”的竞态。</p>
+     *
+     * <p>已由其他成员认领时直接拒绝，而不是抢占——部门内部先到先得，
+     * 抢任务会让两个人同时以为自己在处理同一条沟通。</p>
+     */
+    private void replyDeptCommTask(BizCommTask ct, String userId, String replyContent,
+                                   BizCommTaskManager taskMgr) {
+        if (replyContent == null || replyContent.trim().isEmpty()) {
+            throw new BusinessException("请填写部门意见");
+        }
+        if (!BizCommTask.STATUS_PENDING.equals(ct.getStatus())) {
+            throw new BusinessException("该沟通已处理或已收回");
+        }
+        if (!deptCommProcessService.isDeptMember(userId, ct.getTargetId())) {
+            throw new BusinessException("仅 " + (ct.getTargetName() == null ? ct.getTargetId() : ct.getTargetName())
+                    + " 的成员可提交该部门意见");
+        }
+        List<BizCommTask> allTasks = taskMgr.findBySessionId(ct.getSessionId());
+        BizCommTask pendingChild = CommChainRules.findPendingDescendant(ct.getId(), allTasks);
+        if (pendingChild != null) {
+            throw new BusinessException("还有未反馈的沟通（"
+                    + CommChainRules.commTargetLabel(pendingChild)
+                    + "），请等对方反馈，或由发起人/上游沟通对象收回后再提交反馈");
+        }
+
+        org.camunda.bpm.engine.task.Task deptTask =
+                deptCommProcessService.findDeptTask(ct.getDeptProcInstId(), ct.getCamundaTaskId());
+        if (deptTask == null) {
+            throw new BusinessException("部门沟通待办已结束，无法再提交意见");
+        }
+        if (deptTask.getAssignee() == null) {
+            if (!deptCommProcessService.claim(deptTask.getId(), userId)) {
+                throw new BusinessException("该部门沟通已被其他成员认领，请等待其提交意见");
+            }
+        } else if (!userId.equals(deptTask.getAssignee())) {
+            throw new BusinessException("该部门沟通已由 " + deptTask.getAssignee()
+                    + " 认领，请等待其提交意见");
+        }
+        // 意见先写变量，监听器在 complete 时读取并落业务表。
+        // complete 会触发 DeptCommReplyListener 写审批意见，评论作者同样取自认证上下文：
+        // 不在这里设置，部门成员提交的意见在「意见/沟通」里查不到作者（USER_ID_ 为 null）。
+        taskService.setVariable(deptTask.getId(), DeptCommProcessService.VAR_REPLY, replyContent.trim());
+        org.camunda.bpm.engine.IdentityService identity = processEngine.getIdentityService();
+        identity.setAuthenticatedUserId(userId);
+        try {
+            taskService.complete(deptTask.getId());
+        } finally {
+            identity.clearAuthentication();
+        }
+    }
+
+    /**
+     * 以指定用户身份写审批意见。
+     *
+     * <p>{@code TaskService.createComment} 的作者是 Camunda 认证上下文里的用户，
+     * 而不是方法的入参，所以必须在调用前显式设置；调用后恢复原值，
+     * 避免命令内的外层身份被这一条评论覆盖。</p>
+     */
+    private void createCommentAs(String userId, String taskId, String processInstanceId, String message) {
+        org.camunda.bpm.engine.IdentityService identity = processEngine.getIdentityService();
+        if (userId != null && !userId.isBlank()) {
+            identity.setAuthenticatedUserId(userId);
+        }
+        try {
+            taskService.createComment(taskId, processInstanceId, message);
+        } finally {
+            identity.clearAuthentication();
+        }
     }
 }

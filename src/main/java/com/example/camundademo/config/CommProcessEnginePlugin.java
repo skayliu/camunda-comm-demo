@@ -55,6 +55,8 @@ public class CommProcessEnginePlugin extends AbstractProcessEnginePlugin {
             config.setCustomPreBPMNParseListeners(preParseListeners);
         }
         preParseListeners.add(new GlobalUserTaskParseListener());
+        // 流程级监听：主流程结束时级联终止部门沟通子流程，避免孤儿实例
+        preParseListeners.add(new GlobalProcessParseListener());
 
         // 2. 注册自定义SessionFactory
         List<SessionFactory> sessionFactories = config.getCustomSessionFactories();

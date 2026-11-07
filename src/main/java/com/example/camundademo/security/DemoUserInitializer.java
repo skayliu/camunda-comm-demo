@@ -48,6 +48,12 @@ public class DemoUserInitializer implements ApplicationRunner {
     private static Map<String, List<String>> memberships() {
         Map<String, List<String>> map = new LinkedHashMap<>();
         map.put("admin", List.of("admin", "camunda-admin"));
+        // 部门沟通的演示数据：部门即 Camunda 的 group，dept_handle 用候选组承接，
+        // 部门内任意成员认领后提交意见。没有成员时部门沟通无人能处理。
+        map.put("alice", List.of("dept_it"));
+        map.put("bob", List.of("dept_it"));
+        map.put("carol", List.of("dept_admin"));
+        map.put("dave", List.of("dept_admin"));
         return map;
     }
 
@@ -55,8 +61,20 @@ public class DemoUserInitializer implements ApplicationRunner {
         Map<String, String> map = new LinkedHashMap<>();
         map.put("admin", "Application Administrators");
         map.put("camunda-admin", "Camunda BPM Administrators");
+        map.put("dept_it", "IT 部");
+        map.put("dept_admin", "行政部");
         return map;
     }
+
+    /** 组类型：部门组用 DEPARTMENT，沟通对象选择器据此区分“人”和“部门” */
+    private static Map<String, String> groupTypes() {
+        Map<String, String> map = new LinkedHashMap<>();
+        map.put("dept_it", "DEPARTMENT");
+        map.put("dept_admin", "DEPARTMENT");
+        return map;
+    }
+
+    private static final Map<String, String> DEMO_GROUP_TYPES = groupTypes();
 
     private final IdentityService identityService;
 
@@ -93,11 +111,18 @@ public class DemoUserInitializer implements ApplicationRunner {
         DEMO_GROUP_MEMBERS.forEach((userId, groupIds) -> {
             for (String groupId : groupIds) {
                 try {
-                    if (identityService.createGroupQuery().groupId(groupId).count() == 0) {
+                    String type = DEMO_GROUP_TYPES.getOrDefault(groupId, "WORKFLOW");
+                    Group existing = identityService.createGroupQuery().groupId(groupId).singleResult();
+                    if (existing == null) {
                         Group group = identityService.newGroup(groupId);
                         group.setName(DEMO_GROUP_NAMES.getOrDefault(groupId, groupId));
-                        group.setType("WORKFLOW");
+                        group.setType(type);
                         identityService.saveGroup(group);
+                    } else if (!type.equals(existing.getType())) {
+                        // 老库里部门组可能已存在但类型为空，补上类型后选择器才认得出
+                        existing.setName(DEMO_GROUP_NAMES.getOrDefault(groupId, existing.getName()));
+                        existing.setType(type);
+                        identityService.saveGroup(existing);
                     }
                     if (identityService.createGroupQuery().groupMember(userId).groupId(groupId).count() == 0) {
                         identityService.createMembership(userId, groupId);

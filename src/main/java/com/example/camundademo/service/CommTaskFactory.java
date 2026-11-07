@@ -12,6 +12,8 @@ import org.camunda.bpm.engine.impl.cfg.ProcessEngineConfigurationImpl;
 import org.camunda.bpm.engine.impl.interceptor.Command;
 import org.camunda.bpm.engine.impl.persistence.entity.TaskEntity;
 import org.camunda.bpm.engine.task.Task;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -34,11 +36,16 @@ import java.util.UUID;
 @Service
 public class CommTaskFactory {
 
+    private static final Logger log = LoggerFactory.getLogger(CommTaskFactory.class);
+
     @Autowired
     private TaskService taskService;
 
     @Autowired
     private ProcessEngine processEngine;
+
+    @Autowired
+    private DeptCommProcessService deptCommProcessService;
 
     private ProcessEngineConfigurationImpl getEngineConfig() {
         return (ProcessEngineConfigurationImpl) processEngine.getProcessEngineConfiguration();
@@ -65,6 +72,9 @@ public class CommTaskFactory {
                                                           List<Map<String, String>> targets) {
         ProcessEngineConfigurationImpl engineConfig = getEngineConfig();
         Map<String, Object> result = new LinkedHashMap<>();
+        // 部门沟通在建单命令内启动子流程，dept_handle 此刻还没 flush，拿不到任务ID。
+        // 这里记下待回填的记录，命令提交后再补齐（详见 backfillDeptTaskIds）。
+        List<String[]> pendingTaskIdBackfill = new ArrayList<>();
 
         engineConfig.getCommandExecutorTxRequired().execute((Command<Void>) commandContext -> {
             Task rootTask = taskService.createTaskQuery().taskId(rootTaskId).singleResult();
@@ -124,7 +134,7 @@ public class CommTaskFactory {
                         continue;
                     }
                     createCommTaskRecord(rootTask, activeSession.getId(), null, appendContent, t,
-                            extMgr, taskMgr);
+                            extMgr, taskMgr, pendingTaskIdBackfill);
                     // 同一次提交里重复勾选同一人时也只建一条
                     joined.add(key);
                     added.add(t.get("name"));
@@ -169,7 +179,8 @@ public class CommTaskFactory {
 
             List<String> created = new ArrayList<>();
             for (Map<String, String> t : normalizedTargets) {
-                createCommTaskRecord(rootTask, sessionId, null, content, t, extMgr, taskMgr);
+                createCommTaskRecord(rootTask, sessionId, null, content, t, extMgr, taskMgr,
+                        pendingTaskIdBackfill);
                 created.add(t.get("name"));
             }
 
@@ -185,6 +196,7 @@ public class CommTaskFactory {
             return null;
         });
 
+        backfillDeptTaskIds(pendingTaskIdBackfill);
         return result;
     }
 
@@ -196,10 +208,51 @@ public class CommTaskFactory {
      */
     private void createCommTaskRecord(Task rootTask, String sessionId, String parentRecordId, String content,
                                       Map<String, String> target,
-                                      BizTaskExtManager extMgr, BizCommTaskManager taskMgr) {
+                                      BizTaskExtManager extMgr, BizCommTaskManager taskMgr,
+                                      List<String[]> pendingTaskIdBackfill) {
         String targetType = target.get("type");
         String targetId = target.get("id");
         String targetName = target.get("name");
+
+        BizCommTask ct = new BizCommTask();
+        ct.setId(UUID.randomUUID().toString().replace("-", ""));
+        ct.setSessionId(sessionId);
+        ct.setParentCommTaskId(parentRecordId);
+        ct.setSourceTaskId(rootTask.getId());
+        ct.setRootTaskId(rootTask.getId());
+        // 单独落一份来源节点 key，报表按节点统计时无需解析 #COMM 后缀
+        ct.setSourceTaskDefKey(rootTask.getTaskDefinitionKey());
+        ct.setTargetType(targetType);
+        ct.setTargetId(targetId);
+        ct.setTargetName(targetName);
+        ct.setContent(content);
+        ct.setStatus(BizCommTask.STATUS_PENDING);
+        ct.setCreateTime(new Date());
+
+        // 部门沟通：交给 dept_communication 子流程承接，部门内任意成员认领后反馈。
+        // 不能像人一样建 standalone 旁路任务——旁路任务的 assignee 只能写一个账号，
+        // 把部门ID 写进去，部门里没有任何人的待办会收到它。
+        if (BizCommTask.TARGET_DEPT.equals(targetType)) {
+            // 先启动子流程拿到实例ID与任务ID，再一次性插入业务记录。
+            // 不能在同一个命令里“先 insert 再 update”：Camunda 的实体缓存会认为
+            // 该 id 已处于 TRANSIENT，再 merge 直接抛
+            // ENGINE-03002 Cannot add MERGED entity ... already in state 'TRANSIENT'，
+            // 表现为发起部门沟通直接 500。
+            DeptCommProcessService.Started started = deptCommProcessService.start(
+                    ct.getId(), sessionId, rootTask, targetId, targetName, content,
+                    rootTask.getAssignee(), 1);
+            // 子流程实例ID 与部门任务ID 各归各位：前者用于收回时结束整个子流程，
+            // 后者用于待办中心按 taskId 反查这条沟通记录
+            ct.setDeptProcInstId(started.getProcessInstanceId());
+            ct.setCamundaTaskId(started.getTaskId());
+            taskMgr.insert(ct);
+            // 命令内拿不到任务ID 时先记下来，命令提交后再补写，
+            // 让新数据也能按 CAMUNDA_TASK_ID_ 直接命中，而不是只能靠查询端兜底
+            if (started.getTaskId() == null) {
+                pendingTaskIdBackfill.add(new String[]{ct.getId(), started.getProcessInstanceId()});
+            }
+            return;
+        }
 
         // 创建Camunda原生旁路沟通任务（无executionId），
         // taskDefinitionKey 记为「源节点key#COMM」，便于追溯是哪个节点发起的沟通
@@ -231,28 +284,8 @@ public class CommTaskFactory {
         commExt.setUpdateTime(new Date());
         extMgr.insert(commExt);
 
-        BizCommTask ct = new BizCommTask();
-        ct.setId(UUID.randomUUID().toString().replace("-", ""));
-        ct.setSessionId(sessionId);
-        ct.setParentCommTaskId(parentRecordId);
-        ct.setSourceTaskId(rootTask.getId());
-        ct.setRootTaskId(rootTask.getId());
-        // 单独落一份来源节点 key，报表按节点统计时无需解析 #COMM 后缀
-        ct.setSourceTaskDefKey(rootTask.getTaskDefinitionKey());
-        ct.setTargetType(targetType);
-        ct.setTargetId(targetId);
-        ct.setTargetName(targetName);
-        ct.setContent(content);
-        ct.setStatus(BizCommTask.STATUS_PENDING);
-        ct.setCreateTime(new Date());
         // 旁路任务ID 落 CAMUNDA_TASK_ID_，供后续收回/反馈定位任务
         ct.setCamundaTaskId(camundaTaskId);
-        // 部门沟通子流程的挂载点（当前未实现，deptProcInstId 保持 null）：
-        //   if (BizCommTask.TARGET_DEPT.equals(targetType)) {
-        //       ProcessInstance sub = runtimeService.startProcessInstanceByKey("dept_communication_flow", vars);
-        //       ct.setDeptProcInstId(sub.getId());
-        //   }
-        // 两个字段各归各位：任务ID 只进 camundaTaskId，子流程实例ID 只进 deptProcInstId，不再互相顶替。
         taskMgr.insert(ct);
     }
 
@@ -262,6 +295,7 @@ public class CommTaskFactory {
     public void continueCommunication(String parentCommTaskRecordId, String userId, String content,
                                       List<Map<String, String>> targets) {
         ProcessEngineConfigurationImpl engineConfig = getEngineConfig();
+        List<String[]> pendingTaskIdBackfill = new ArrayList<>();
         engineConfig.getCommandExecutorTxRequired().execute((Command<Void>) commandContext -> {
             BizCommTaskManager taskMgr = commandContext.getSession(BizCommTaskManager.class);
             BizCommSessionManager sessionMgr = commandContext.getSession(BizCommSessionManager.class);
@@ -301,9 +335,12 @@ public class CommTaskFactory {
                 extMgr.update(ext);
             }
 
-            createFollowUpRecords(rootTask, parent, session, content, normalizedTargets, extMgr, taskMgr);
+            createFollowUpRecords(rootTask, parent, session, content, normalizedTargets,
+                    userId, extMgr, taskMgr, pendingTaskIdBackfill);
             return null;
         });
+
+        backfillDeptTaskIds(pendingTaskIdBackfill);
     }
 
     /**
@@ -320,6 +357,7 @@ public class CommTaskFactory {
                                                     List<Map<String, String>> targets) {
         ProcessEngineConfigurationImpl engineConfig = getEngineConfig();
         Map<String, Object> result = new LinkedHashMap<>();
+        List<String[]> pendingTaskIdBackfill = new ArrayList<>();
         engineConfig.getCommandExecutorTxRequired().execute((Command<Void>) commandContext -> {
             BizCommTaskManager taskMgr = commandContext.getSession(BizCommTaskManager.class);
             BizCommSessionManager sessionMgr = commandContext.getSession(BizCommSessionManager.class);
@@ -329,8 +367,12 @@ public class CommTaskFactory {
             if (parent == null) {
                 throw new BusinessException("沟通记录不存在");
             }
-            // 身份校验：只有这条沟通的接收人本人可以把沟通转给其他人
-            if (operator == null || !operator.equals(parent.getTargetId())) {
+            // 身份校验：只有这条沟通的接收方可以把沟通转给其他人。
+            // 部门沟通的接收方是整个部门，部门内任意成员都可以再发起。
+            boolean isReceiver = operator != null && (operator.equals(parent.getTargetId())
+                    || (BizCommTask.TARGET_DEPT.equals(parent.getTargetType())
+                        && deptCommProcessService.isDeptMember(operator, parent.getTargetId())));
+            if (!isReceiver) {
                 throw new BusinessException("仅当前沟通对象本人可再次发起沟通");
             }
             if (!BizCommTask.STATUS_PENDING.equals(parent.getStatus())) {
@@ -387,29 +429,123 @@ public class CommTaskFactory {
             }
 
             List<String> created = createFollowUpRecords(rootTask, parent, session,
-                    normalizedContent, normalizedTargets, extMgr, taskMgr);
+                    normalizedContent, normalizedTargets, operator, extMgr, taskMgr, pendingTaskIdBackfill);
 
             result.put("sessionId", session.getId());
             result.put("currentRound", session.getCurrentRound());
             result.put("addedTargets", created);
             return null;
         });
+
+        backfillDeptTaskIds(pendingTaskIdBackfill);
         return result;
+    }
+
+    /**
+     * 部门沟通任务ID 回填。
+     *
+     * <p>部门子流程是在建单命令内启动的，{@code dept_handle} 到命令结束才 flush，
+     * 建单时取不到任务ID，{@code CAMUNDA_TASK_ID_} 只能落空——新数据于是全靠
+     * {@code DEPT_PROC_INST_ID_} 兜底反查。这里在命令提交后另起一个短命令，
+     * 按子流程实例ID 查出部门任务并写回业务表，让新数据也能按任务ID 直接命中。</p>
+     *
+     * <p>查询端的实例ID 兜底要保留：它继续负责历史数据，以及本次回填失败的情况。
+     * 回填属于“锦上添花”，任何异常都不能让已经成功的发起动作失败。</p>
+     */
+    private void backfillDeptTaskIds(List<String[]> pending) {
+        if (pending == null || pending.isEmpty()) {
+            return;
+        }
+        try {
+            getEngineConfig().getCommandExecutorTxRequired().execute((Command<Void>) commandContext -> {
+                BizCommTaskManager taskMgr = commandContext.getSession(BizCommTaskManager.class);
+                for (String[] item : pending) {
+                    String recordId = item[0];
+                    String procInstId = item[1];
+                    if (procInstId == null) {
+                        continue;
+                    }
+                    Task deptTask = taskService.createTaskQuery()
+                            .processInstanceId(procInstId)
+                            .taskDefinitionKey(DeptCommProcessService.TASK_KEY)
+                            .singleResult();
+                    if (deptTask == null) {
+                        // 子流程刚启动就被收回/终止时，任务已不存在，无需回填
+                        log.warn("部门沟通任务ID 回填跳过：record={}, pid={} 下没有待处理的部门任务",
+                                recordId, procInstId);
+                        continue;
+                    }
+                    BizCommTask record = taskMgr.findById(recordId);
+                    if (record == null || record.getCamundaTaskId() != null) {
+                        continue;
+                    }
+                    // 走实体 merge（Camunda 在命令结束时统一刷盘）。
+                    // 不用 id 直更：同一 SqlSession 处于批处理模式，直接 update 的语句可能
+                    // 不会被 Camunda 的 flush 带走，实测表现为“日志有 SQL、库里仍是 NULL”。
+                    record.setCamundaTaskId(deptTask.getId());
+                    taskMgr.update(record);
+                    log.info("部门沟通任务ID 回填：record={}, pid={}, task={}",
+                            recordId, procInstId, deptTask.getId());
+                }
+                return null;
+            });
+        } catch (RuntimeException e) {
+            log.warn("部门沟通任务ID 回填失败，查询端将按子流程实例ID 兜底，pending={}", pending.size(), e);
+        }
     }
 
     /**
      * 为首轮之后的沟通建单（追问 / 转交共用）。
      * 每条记录同时创建 Camunda 旁路任务与扩展记录，父链指向 {@code parent}。
+     *
+     * @param operator 本次操作人：追问时是原发起人，转交时是当前沟通对象。
+     *                 部门子流程的「发起人」记他，而不是会话最初发起人——
+     *                 否则部门成员把沟通转给另一个部门时，子流程会显示成别人的发起。
      */
     private List<String> createFollowUpRecords(Task rootTask, BizCommTask parent, BizCommSession session,
                                                String content, List<Map<String, String>> targets,
-                                               BizTaskExtManager extMgr, BizCommTaskManager taskMgr) {
+                                               String operator,
+                                               BizTaskExtManager extMgr, BizCommTaskManager taskMgr,
+                                               List<String[]> pendingTaskIdBackfill) {
         String procInstId = rootTask.getProcessInstanceId();
         String procDefId = rootTask.getProcessDefinitionId();
         int round = session.getCurrentRound();
         List<String> created = new ArrayList<>(targets.size());
         for (Map<String, String> t : targets) {
             String newRecordId = UUID.randomUUID().toString().replace("-", "");
+
+            BizCommTask ct = new BizCommTask();
+            ct.setId(newRecordId);
+            ct.setSessionId(parent.getSessionId());
+            ct.setParentCommTaskId(parent.getId());
+            ct.setSourceTaskId(parent.getSourceTaskId());
+            ct.setRootTaskId(parent.getRootTaskId());
+            // 追问同样归属会话发起节点；历史父记录可能没有该字段，回退到父记录的上游节点
+            ct.setSourceTaskDefKey(rootTask.getTaskDefinitionKey() != null
+                    ? rootTask.getTaskDefinitionKey() : parent.getSourceTaskDefKey());
+            ct.setTargetType(t.get("type"));
+            ct.setTargetId(t.get("id"));
+            ct.setTargetName(t.get("name"));
+            ct.setContent(content);
+            ct.setStatus(BizCommTask.STATUS_PENDING);
+            ct.setCreateTime(new Date());
+
+            // 部门沟通同样走子流程：候选组承接，部门成员认领后反馈。
+            // 与首轮同理：先启动子流程，再一次性插入记录，避免同一命令内 insert 后 merge
+            // 触发 ENGINE-03002（TRANSIENT 实体无法再次 merge）。
+            if (BizCommTask.TARGET_DEPT.equals(t.get("type"))) {
+                DeptCommProcessService.Started started = deptCommProcessService.start(
+                        newRecordId, parent.getSessionId(), rootTask, t.get("id"), t.get("name"), content,
+                        operator, round);
+                ct.setDeptProcInstId(started.getProcessInstanceId());
+                ct.setCamundaTaskId(started.getTaskId());
+                taskMgr.insert(ct);
+                if (started.getTaskId() == null) {
+                    pendingTaskIdBackfill.add(new String[]{ct.getId(), started.getProcessInstanceId()});
+                }
+                created.add(t.get("name"));
+                continue;
+            }
 
             TaskEntity commTask = (TaskEntity) taskService.newTask();
             // 后续沟通同样沿用源待办名称，与源节点保持一致；用 description 保留“继续沟通 + 轮次 + 内容”，
@@ -438,21 +574,6 @@ public class CommTaskFactory {
             commExt.setUpdateTime(new Date());
             extMgr.insert(commExt);
 
-            BizCommTask ct = new BizCommTask();
-            ct.setId(newRecordId);
-            ct.setSessionId(parent.getSessionId());
-            ct.setParentCommTaskId(parent.getId());
-            ct.setSourceTaskId(parent.getSourceTaskId());
-            ct.setRootTaskId(parent.getRootTaskId());
-            // 追问同样归属会话发起节点；历史父记录可能没有该字段，回退到父记录的上游节点
-            ct.setSourceTaskDefKey(rootTask.getTaskDefinitionKey() != null
-                    ? rootTask.getTaskDefinitionKey() : parent.getSourceTaskDefKey());
-            ct.setTargetType(t.get("type"));
-            ct.setTargetId(t.get("id"));
-            ct.setTargetName(t.get("name"));
-            ct.setContent(content);
-            ct.setStatus(BizCommTask.STATUS_PENDING);
-            ct.setCreateTime(new Date());
             ct.setCamundaTaskId(newCamundaTaskId);
             taskMgr.insert(ct);
             created.add(t.get("name"));

@@ -289,6 +289,10 @@ export const commApi = {
   },
   targets(keyword) {
     return http.get('/comm/targets', { params: { keyword } })
+  },
+  /** 可选沟通部门：部门沟通走独立子流程，前端据此以 type=DEPT 提交 */
+  departments(keyword) {
+    return http.get('/comm/departments', { params: { keyword } })
   }
 }
 

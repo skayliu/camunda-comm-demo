@@ -2,6 +2,7 @@ package com.example.camundademo.service;
 
 import com.example.camundademo.entity.BizCommTask;
 import org.camunda.bpm.engine.HistoryService;
+import org.camunda.bpm.engine.IdentityService;
 import org.camunda.bpm.engine.RepositoryService;
 import org.camunda.bpm.engine.RuntimeService;
 import org.camunda.bpm.engine.TaskService;
@@ -9,9 +10,14 @@ import org.camunda.bpm.engine.history.HistoricActivityInstance;
 import org.camunda.bpm.engine.history.HistoricProcessInstance;
 import org.camunda.bpm.engine.history.HistoricTaskInstance;
 import org.camunda.bpm.engine.history.HistoricVariableInstance;
+import org.camunda.bpm.engine.identity.Group;
 import org.camunda.bpm.engine.repository.ProcessDefinition;
 import org.camunda.bpm.engine.task.Comment;
+import org.camunda.bpm.engine.task.IdentityLink;
+import org.camunda.bpm.engine.task.IdentityLinkType;
 import org.camunda.bpm.engine.task.Task;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.w3c.dom.Document;
@@ -25,14 +31,13 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * 流程图跟踪服务：把 Camunda 的 BPMN DI（节点坐标、连线路径）与历史活动实例
@@ -44,7 +49,7 @@ import java.util.logging.Logger;
 @Service
 public class ProcessTraceService {
 
-    private static final Logger LOG = Logger.getLogger(ProcessTraceService.class.getName());
+    private static final Logger LOG = LoggerFactory.getLogger(ProcessTraceService.class);
 
     /** BPMN 2.0 模型命名空间 */
     private static final String BPMN_NS = "http://www.omg.org/spec/BPMN/20100524/MODEL";
@@ -149,6 +154,9 @@ public class ProcessTraceService {
 
     @Autowired
     private CommunicationService communicationService;
+
+    @Autowired
+    private IdentityService identityService;
 
     @Autowired
     private TaskTransferService taskTransferService;
@@ -260,6 +268,29 @@ public class ProcessTraceService {
             }
         }
 
+        // 候选组名称在本实例内查一次、缓存一次：同一部门可能出现在多个节点/多条执行上
+        Map<String, String> groupNameCache = new HashMap<>();
+        // 部门沟通子流程的候选组写成 ${deptId}，BPMN 里是表达式而不是部门ID，
+        // 历史身份链接缺失时退回 deptName 变量，明细才不会只写“待认领”却看不到该找谁。
+        // 同时带回“值取自哪一级”，诊断日志才能区分“兜底命中”与“两级都空”。
+        DeptCandidates deptCandidates = deptCandidates(hpi, groupNameCache);
+        // 实例用的 BPMN 版本：候选链接缺失的常见成因之一是“实例跑在旧版本定义上”，
+        // 光看代码改了没用，必须能从日志一眼对上是哪个版本。
+        String procDefId = hpi == null ? null : hpi.getProcessDefinitionId();
+
+        // 运行期任务集合：查询任务身份链接前必须先确认任务还在运行。
+        // WorkbenchController.trace 在每次打开跟踪图时都会走一遍，这里只查一次实例下的运行任务，
+        // 避免每个历史活动各查一次、也避免对已结束任务调用 getIdentityLinksForTask。
+        Set<String> runningTaskIds = new HashSet<>();
+        try {
+            for (Task t : taskService.createTaskQuery().processInstanceId(processInstanceId).list()) {
+                runningTaskIds.add(t.getId());
+            }
+        } catch (RuntimeException ex) {
+            // 引擎查询失败时退化为“无运行期任务”，只损失待认领标记，不能让跟踪图打不开
+            LOG.warn("加载运行期任务失败，processInstanceId=" + processInstanceId, ex);
+        }
+
         // 流程节点的执行实例，按节点 key 聚合
         Map<String, List<HistoricActivityInstance>> byNode = new LinkedHashMap<>();
         for (HistoricActivityInstance a : activities) {
@@ -338,18 +369,48 @@ public class ProcessTraceService {
                     .add(toCommTaskVO(t, record, initiator));
         }
 
-        // 已收回的沟通必须从业务表补：收回走 taskService.deleteTask(...)，
-        // Camunda 会把对应的 ACT_HI_TASKINST 历史任务一并删除，历史任务查询根本拿不到这些记录。
-        // 这里按「该实例上出现过的任务 ID」反查 BIZ_COMM_TASK_，把历史里缺失的记录还原出来。
-        // 兜底查询失败（如老库缺 BIZ_COMM_TASK_ 表）时不能拖垮整张跟踪图，只损失已收回记录。
-        List<BizCommTask> withdrawnRecords = Collections.emptyList();
+        // 业务表兜底：引擎历史里缺失的沟通记录只能从这里补回来。
+        // 两种记录必须补：
+        // 1) 已收回的沟通 —— 收回走 taskService.deleteTask(...)，Camunda 会把对应的
+        //    ACT_HI_TASKINST 历史任务一并删除，历史任务查询根本拿不到；
+        // 2) 部门沟通 —— 任务来自独立的 dept_communication 子流程，属于另一个流程实例，
+        //    按当前 processInstanceId 查历史任务永远扫不到它（表现为同时给人、给部门
+        //    发沟通时，跟踪图和明细里只剩人员那一条）。
+        // 查询失败（如老库缺 BIZ_COMM_TASK_ 表）时不能拖垮整张跟踪图，只损失这两类记录。
+        List<BizCommTask> sourceRecords = Collections.emptyList();
         try {
-            withdrawnRecords = communicationService
+            sourceRecords = communicationService
                     .getCommRecordsBySourceTaskIds(sourceDefKeyByTaskId.keySet());
         } catch (RuntimeException ex) {
-            LOG.log(Level.WARNING, "跟踪图补全已收回沟通失败，processInstanceId=" + processInstanceId, ex);
+            LOG.warn("跟踪图补全沟通记录失败，processInstanceId=" + processInstanceId, ex);
         }
-        for (BizCommTask record : withdrawnRecords) {
+
+        // 部门沟通按业务记录还原，归到发起它的源节点上。
+        // 历史任务里已存在同一条记录时跳过，避免与上面的引擎侧展示重复。
+        for (BizCommTask record : sourceRecords) {
+            if (!BizCommTask.TARGET_DEPT.equals(record.getTargetType())) {
+                continue;
+            }
+            // 已收回的记录交给下面的统一分支处理，避免同一条记录被两套逻辑各加一次
+            if (BizCommTask.STATUS_WITHDRAWN.equals(record.getStatus())) {
+                continue;
+            }
+            if (record.getCamundaTaskId() != null && taskById.containsKey(record.getCamundaTaskId())) {
+                continue;
+            }
+            String sourceKey = record.getSourceTaskDefKey() != null
+                    ? record.getSourceTaskDefKey()
+                    : sourceDefKeyByTaskId.get(record.getSourceTaskId());
+            if (sourceKey == null) {
+                continue;
+            }
+            String initiator = record.getSourceTaskId() == null
+                    ? null : sourceAssigneeByTaskId.get(record.getSourceTaskId());
+            commByNode.computeIfAbsent(sourceKey, k -> new ArrayList<>())
+                    .add(toDeptCommVO(record, initiator, sourceKey));
+        }
+
+        for (BizCommTask record : sourceRecords) {
             if (!BizCommTask.STATUS_WITHDRAWN.equals(record.getStatus())) {
                 continue;
             }
@@ -377,7 +438,7 @@ public class ProcessTraceService {
             instanceTransfers = taskTransferService.listByProcessInstanceId(processInstanceId);
         } catch (RuntimeException ex) {
             // 老库缺 BIZ_TASK_TRANSFER_ 表时不能让整张跟踪图挂掉，仅损失转办信息
-            LOG.log(Level.WARNING, "加载转办记录失败，processInstanceId=" + processInstanceId, ex);
+            LOG.warn("加载转办记录失败，processInstanceId=" + processInstanceId, ex);
         }
         Map<String, List<Map<String, Object>>> transferByTaskId = new LinkedHashMap<>();
         Map<String, List<Map<String, Object>>> transferByDefKey = new LinkedHashMap<>();
@@ -438,15 +499,33 @@ public class ProcessTraceService {
             List<Map<String, Object>> executions = new ArrayList<>();
             Set<String> assignees = new LinkedHashSet<>();
             List<Map<String, Object>> comments = new ArrayList<>();
+            // 候选组/候选人：未认领时明细要能说清“还在等谁”，而不是只留一个「—」
+            Set<String> candidateGroups = new LinkedHashSet<>();
+            Set<String> candidateGroupNames = new LinkedHashSet<>();
+            Set<String> candidateUsers = new LinkedHashSet<>();
+            boolean pendingClaim = false;
             Date firstStart = null;
             Date lastEnd = null;
             long duration = 0L;
             boolean anyRunning = false;
 
             for (HistoricActivityInstance a : instances) {
+                // 办理人优先取历史任务表。Camunda 对「先 claim 再 complete」的候选组任务
+                // 只把 assignee 写进 ACT_HI_TASKINST，ACT_HI_ACTINST.ASSIGNEE_ 仍为 null，
+                // 而早期实现只读后者，导致部门沟通这类任务明明有人办理，明细里却是「—」。
+                String assignee = assigneeOf(a, taskById);
+                // 进行中且无人办理 = 尚未认领；已结束（含被取消）的任务不再标“待认领”
+                boolean running = a.getEndTime() == null && !a.isCanceled();
+                CandidateInfo candidate = candidateInfoOf(a.getTaskId(), a.getActivityId(),
+                        processInstanceId, procDefId, assignee, running,
+                        runningTaskIds, groupNameCache, deptCandidates);
                 Map<String, Object> exec = new LinkedHashMap<>();
                 exec.put("taskId", a.getTaskId());
-                exec.put("assignee", a.getAssignee());
+                exec.put("assignee", assignee);
+                exec.put("pendingClaim", candidate.pendingClaim);
+                exec.put("candidateGroups", candidate.groupIds);
+                exec.put("candidateGroupNames", candidate.groupNames);
+                exec.put("candidateUsers", candidate.userIds);
                 exec.put("startTime", a.getStartTime());
                 exec.put("endTime", a.getEndTime());
                 exec.put("durationInMillis", a.getDurationInMillis());
@@ -458,8 +537,15 @@ public class ProcessTraceService {
                 }
                 executions.add(exec);
 
-                if (a.getAssignee() != null && !a.getAssignee().isBlank()) {
-                    assignees.add(a.getAssignee());
+                if (candidate.pendingClaim) {
+                    pendingClaim = true;
+                }
+                candidateGroups.addAll(candidate.groupIds);
+                candidateGroupNames.addAll(candidate.groupNames);
+                candidateUsers.addAll(candidate.userIds);
+
+                if (assignee != null && !assignee.isBlank()) {
+                    assignees.add(assignee);
                 }
                 if (a.getStartTime() != null && (firstStart == null || a.getStartTime().before(firstStart))) {
                     firstStart = a.getStartTime();
@@ -475,6 +561,12 @@ public class ProcessTraceService {
             }
 
             node.put("assignees", new ArrayList<>(assignees));
+            // 未认领标记与候选范围：前端据此把「—」显示成「待认领 · 候选部门：xxx」，
+            // 避免把“还没人接手”误读成“办理人漏写”。
+            node.put("pendingClaim", pendingClaim);
+            node.put("candidateGroups", new ArrayList<>(candidateGroups));
+            node.put("candidateGroupNames", new ArrayList<>(candidateGroupNames));
+            node.put("candidateUsers", new ArrayList<>(candidateUsers));
             node.put("startTime", firstStart);
             node.put("endTime", lastEnd);
             node.put("durationInMillis", instances.isEmpty() ? null : duration);
@@ -740,6 +832,212 @@ public class ProcessTraceService {
         return taken ? EDGE_TAKEN : EDGE_NONE;
     }
 
+    /**
+     * 取某个活动实例的办理人。
+     *
+     * <p>{@link HistoricActivityInstance#getAssignee()} 读的是 {@code ACT_HI_ACTINST.ASSIGNEE_}，
+     * 它只在任务创建时就带有办理人（如 BPMN 里写死 assignee）时才有值。候选组任务
+     * （{@code camunda:candidateGroups}）先由成员认领、再办结的路径，Camunda 只更新
+     * {@code ACT_HI_TASKINST.ASSIGNEE_}，活动实例上始终是 null。部门沟通的 dept_handle
+     * 正是这种任务，所以必须优先取历史任务表，活动实例仅作兜底（历史任务已被删除时）。</p>
+     */
+    private String assigneeOf(HistoricActivityInstance a, Map<String, HistoricTaskInstance> taskById) {
+        if (a.getTaskId() != null) {
+            HistoricTaskInstance task = taskById.get(a.getTaskId());
+            if (task != null && task.getAssignee() != null && !task.getAssignee().isBlank()) {
+                return task.getAssignee();
+            }
+        }
+        return a.getAssignee() == null || a.getAssignee().isBlank() ? null : a.getAssignee();
+    }
+
+    /**
+     * 解析任务实例的候选范围，并判定是否仍处于「待认领」。
+     *
+     * <p>候选组必须取 {@code ACT_RU_IDENTITYLINK}（type = candidate）：部门沟通的
+     * {@code dept_handle} 在 BPMN 里写的是 {@code camunda:candidateGroups="${deptId}"}，
+     * 是表达式而不是部门ID，静态解析 BPMN 拿不到具体部门；身份链接在任务创建时即写入，
+     * 认领后依然保留，是判断“还在等谁认领”的直接来源。</p>
+     *
+     * <p><b>只能对运行中的任务查</b>：{@code getIdentityLinksForTask} 在任务不存在时
+     * 不是返回空列表，而是抛 {@code NullValueException("Cannot find task with id ...")}。
+     * 跟踪页遍历的是 {@code ACT_HI_ACTINST} 的全部历史活动，绝大多数活动的任务早已办结、
+     * 被收回或随流程结束而删除，逐条直接查会在每次打开跟踪图时刷出一整屏异常堆栈。
+     * 因此这里先用运行期任务集合过滤，只有任务确实还在运行才查身份链接。</p>
+     *
+     * <p>{@code pendingClaim} 只对进行中且任务确实存在的活动成立：已结束（含被取消）
+     * 的任务即便当初无人认领，也已经是历史；而历史活动 endTime 为空、运行任务却已不存在
+     * （如沟通被收回）时同样不能标“待认领”，否则会指向一个已经没人能接的任务。</p>
+     *
+     * <p>「待认领」在页面上只有一种显示，但底层有两种完全不同的成因：候选组压根没生成
+     * （{@code ${deptId}} 没解析出值，任何人都不具备认领资格），以及候选组正常、只是还没人认领。
+     * 两者必须能从日志上分开，因此这里在判定为待认领时输出一条诊断：
+     * 身份链接里的 candidate 链接数、解析出的组ID、兜底变量的来源与命中情况。</p>
+     */
+    private CandidateInfo candidateInfoOf(String taskId, String activityId, String processInstanceId,
+                                         String processDefinitionId,
+                                         String assignee, boolean running,
+                                         Set<String> runningTaskIds,
+                                         Map<String, String> groupNameCache,
+                                         DeptCandidates fallback) {
+        CandidateInfo info = new CandidateInfo();
+        if (taskId == null) {
+            return info;
+        }
+        boolean taskRunning = runningTaskIds != null && runningTaskIds.contains(taskId);
+        boolean unassigned = assignee == null || assignee.isBlank();
+        // 候选信息只有一个用途：未认领时告诉用户“还在等谁”。
+        // 已认领、已结束的任务不需要候选范围，也就不必碰运行期任务表 —— 这是本次
+        // NullValueException 的直接触发点，把查询条件收紧到“确实待认领”后自然消除。
+        info.pendingClaim = running && taskRunning && unassigned;
+        if (info.pendingClaim) {
+            int candidateLinks = 0;
+            try {
+                List<IdentityLink> links = taskService.getIdentityLinksForTask(taskId);
+                for (IdentityLink link : links) {
+                    if (!IdentityLinkType.CANDIDATE.equals(link.getType())) {
+                        continue;
+                    }
+                    candidateLinks++;
+                    String groupId = link.getGroupId();
+                    if (groupId != null && !groupId.isBlank() && info.groupIds.add(groupId)) {
+                        info.groupNames.add(groupName(groupId, groupNameCache));
+                    }
+                    String userId = link.getUserId();
+                    if (userId != null && !userId.isBlank()) {
+                        info.userIds.add(userId);
+                    }
+                }
+            } catch (RuntimeException ex) {
+                // 任务恰好在查询前被办结或收回：只损失候选信息，不能因此让整张跟踪图打不开。
+                // 但这条不是“没有候选”，必须留在日志里，否则又会被当成待认领漏配。
+                LOG.warn("[待认领候选] 查询身份链接失败 taskId=" + taskId
+                        + " activityId=" + activityId + " processInstanceId=" + processInstanceId, ex);
+            }
+            if (info.groupNames.isEmpty() && fallback != null) {
+                info.groupNames.addAll(fallback.names);
+            }
+            logCandidateDiagnosis(taskId, activityId, processInstanceId, processDefinitionId,
+                    candidateLinks, info, fallback);
+        }
+        return info;
+    }
+
+    /**
+     * 待认领任务的候选诊断日志。
+     *
+     * <p>三类结论不能用同一句话概括：</p>
+     * <ul>
+     *   <li>{@code 候选组已生成}：链接里有候选组，页面显示“待认领 · 候选：xx”即可，属正常；</li>
+     *   <li>{@code 候选组未生成}：链接里一条 candidate 都没有，但 {@code deptName}/{@code deptId}
+     *       变量在，页面能显示部门名 —— <b>只是展示被兜底了，任务实际没有候选人，谁都认领不了</b>；</li>
+     *   <li>{@code 无任何候选}：链接与变量两级都空，页面显示“待认领”却没有任何可显示的对象。</li>
+     * </ul>
+     *
+     * <p>{@code candidateLinks} 为 0 且兜底为空时，必须继续查变量是否被写进了作用的子执行实例
+     * （{@code ACT_RU_VARIABLE} 查不到不等于没写），否则容易把“作用域放错”误判为“启动入口没写”。</p>
+     */
+    private void logCandidateDiagnosis(String taskId, String activityId, String processInstanceId,
+                                       String processDefinitionId,
+                                       int candidateLinks, CandidateInfo info, DeptCandidates fallback) {
+        String scope = "taskId=" + taskId
+                + " activityId=" + activityId
+                + " processInstanceId=" + processInstanceId
+                + " procDefId=" + processDefinitionId;
+        boolean hasGroup = !info.groupIds.isEmpty();
+
+        if (hasGroup) {
+            // 正常路径：候选组已生成，页面能显示具体部门。放在 INFO，便于和异常情况一眼区分。
+            LOG.info("[待认领候选] " + scope + " 候选组已生成 candidateLinks=" + candidateLinks
+                    + " groups=" + info.groupIds + " names=" + info.groupNames
+                    + " users=" + info.userIds);
+            return;
+        }
+
+        if (candidateLinks > 0) {
+            // 有 candidate 链接却没有组ID：任务配的是候选人而不是候选组，
+            // 这与“候选组解析失败”不同，页面应显示候选人而不是候选部门。
+            LOG.warn("[待认领候选] " + scope + " 有候选人无候选组 candidateLinks=" + candidateLinks
+                    + " users=" + info.userIds + "，请确认 BPMN 用的是 candidateUsers 而非 candidateGroups");
+            return;
+        }
+
+        boolean fallbackHit = fallback != null && !fallback.names.isEmpty();
+        if (fallbackHit) {
+            LOG.warn("[待认领候选] " + scope
+                    + " 候选组未生成 candidateLinks=0 groups=[] 兜底显示 names=" + fallback.names
+                    + "（来源 " + fallback.source + "）"
+                    + "；兜底只解决展示，任务实际没有候选范围，任何用户都无法认领，"
+                    + "请核对 BPMN 版本与 ${deptId} 是否在任务创建前已写入");
+        } else {
+            String source = fallback == null ? "非部门沟通子流程" : fallback.source;
+            LOG.warn("[待认领候选] " + scope
+                    + " 无任何候选 candidateLinks=0 groups=[] names=[]"
+                    + "（兜底变量来源 " + source + "）"
+                    + "；该任务没有任何候选范围，需检查启动入口是否写入 deptId/deptName"
+                    + "，以及变量是否落在可见的作用域内");
+        }
+    }
+
+    /** 组ID → 组名称；查不到（如外部用户体系未同步）时原样返回组ID，不留空 */
+    private String groupName(String groupId, Map<String, String> cache) {
+        if (cache.containsKey(groupId)) {
+            return cache.get(groupId);
+        }
+        String name = groupId;
+        try {
+            Group group = identityService.createGroupQuery().groupId(groupId).singleResult();
+            if (group != null && group.getName() != null && !group.getName().isBlank()) {
+                name = group.getName();
+            }
+        } catch (RuntimeException ignore) {
+            // 身份服务不可用时退回组ID，明细仍可读
+        }
+        cache.put(groupId, name);
+        return name;
+    }
+
+    /**
+     * 部门沟通子流程的候选部门名称兜底。
+     *
+     * <p>只有 {@code dept_communication} 实例才需要：其它流程的候选组来自 BPMN 静态配置，
+     * 历史身份链接足以覆盖；而这个子流程的候选组是 {@code ${deptId}}，一旦身份链接缺失，
+     * 就只能从启动时写入的 {@code deptName} / {@code deptId} 变量还原。</p>
+     *
+     * <p>返回值同时带上来源说明：诊断日志需要说清“显示出来的部门名是变量兜底的，
+     * 而不是身份链接解析出来的”，否则会把“能看见候选”误判成“候选可用”。</p>
+     */
+    private DeptCandidates deptCandidates(HistoricProcessInstance hpi, Map<String, String> groupNameCache) {
+        if (hpi == null || !DeptCommProcessService.PROCESS_KEY.equals(hpi.getProcessDefinitionKey())) {
+            return DeptCandidates.none("非部门沟通子流程");
+        }
+        try {
+            HistoricVariableInstance deptName = historyService.createHistoricVariableInstanceQuery()
+                    .processInstanceId(hpi.getId())
+                    .variableName(DeptCommProcessService.VAR_DEPT_NAME)
+                    .singleResult();
+            if (deptName != null && deptName.getValue() != null
+                    && !String.valueOf(deptName.getValue()).isBlank()) {
+                String name = String.valueOf(deptName.getValue());
+                return new DeptCandidates(List.of(name), "deptName=" + name);
+            }
+            HistoricVariableInstance deptId = historyService.createHistoricVariableInstanceQuery()
+                    .processInstanceId(hpi.getId())
+                    .variableName(DeptCommProcessService.VAR_DEPT_ID)
+                    .singleResult();
+            if (deptId != null && deptId.getValue() != null) {
+                String raw = String.valueOf(deptId.getValue());
+                return new DeptCandidates(List.of(groupName(raw, groupNameCache)), "deptId=" + raw);
+            }
+            return DeptCandidates.none("deptName 与 deptId 均未写入变量表");
+        } catch (RuntimeException ex) {
+            // 变量缺失时退化为无候选信息，不影响其它节点；但异常本身要留痕，
+            // 否则“读不到变量”和“变量不存在”在页面上是同一个「待认领」。
+            LOG.warn("读取部门沟通候选变量失败，processInstanceId=" + hpi.getId(), ex);
+            return DeptCandidates.none("读取变量异常：" + ex.getMessage());
+        }
+    }
+
     private String resolveStatus(List<HistoricActivityInstance> instances) {
         if (instances.isEmpty()) {
             return STATUS_PENDING;
@@ -801,7 +1099,7 @@ public class ProcessTraceService {
         vo.put("parentCommTaskId", record == null ? null : record.getParentCommTaskId());
         vo.put("rootTaskId", record == null ? null : record.getRootTaskId());
         // 沟通旁路任务ID 读 CAMUNDA_TASK_ID_；DEPT_PROC_INST_ID_ 是部门子流程实例ID，
-        // 当前恒为 null，按 deptProcInstId 原样外发即可（预留字段，前端据此展示部门流转）。
+        // 仅 TARGET_TYPE_ = DEPT 时有值，按 deptProcInstId 原样外发，前端据此展示部门流转实例。
         vo.put("camundaTaskId", record == null ? null : record.getCamundaTaskId());
         vo.put("deptProcInstId", record == null ? null : record.getDeptProcInstId());
         vo.put("status", bizStatus);
@@ -816,6 +1114,98 @@ public class ProcessTraceService {
         vo.put("createTime", record != null && record.getCreateTime() != null
                 ? record.getCreateTime() : t.getStartTime());
         vo.put("durationInMillis", t.getDurationInMillis());
+        return vo;
+    }
+
+    /**
+     * 部门沟通：任务在独立子流程实例里，主实例的历史任务查询取不到，
+     * 只能由业务记录 {@link BizCommTask} 还原成与 {@link #toCommTaskVO} 同构的 VO。
+     *
+     * <p>子流程里的 {@code dept_handle} 历史任务用来补办理人、开始/结束时间；
+     * 查不到（旧数据实例已归档或物理删除）时退回业务记录的创建时间，
+     * 前端仍能正常展示，不会因为少一个字段整行消失。</p>
+     */
+    private Map<String, Object> toDeptCommVO(BizCommTask record, String initiator, String sourceKey) {
+        HistoricTaskInstance deptTask = null;
+        if (record.getDeptProcInstId() != null) {
+            try {
+                List<HistoricTaskInstance> tasks = historyService.createHistoricTaskInstanceQuery()
+                        .processInstanceId(record.getDeptProcInstId())
+                        .taskDefinitionKey(BizCommTask.DEPT_TASK_KEY)
+                        .list();
+                // 一个子流程只会有一个 dept_handle；循环/重试可能留下多条，
+                // 优先取仍在办理中的那条，否则取结束时间最晚的
+                for (HistoricTaskInstance t : tasks) {
+                    if (deptTask == null) {
+                        deptTask = t;
+                    } else if (deptTask.getEndTime() != null
+                            && (t.getEndTime() == null || t.getEndTime().after(deptTask.getEndTime()))) {
+                        deptTask = t;
+                    }
+                }
+            } catch (RuntimeException ignore) {
+                // 子流程实例已被清理时不能拖垮整张跟踪图，退回业务记录展示
+            }
+        }
+        // 部门子流程的发起人以子流程实例上的 START_USER_ID_ 为准（再发起时是实际操作人），
+        // 它比“源待办处理人”更准确；取不到时再用源待办处理人兜底
+        if (record.getDeptProcInstId() != null) {
+            try {
+                HistoricProcessInstance sub = historyService.createHistoricProcessInstanceQuery()
+                        .processInstanceId(record.getDeptProcInstId()).singleResult();
+                if (sub != null && sub.getStartUserId() != null && !sub.getStartUserId().isBlank()) {
+                    initiator = sub.getStartUserId();
+                }
+            } catch (RuntimeException ignore) {
+                // 同上：发起人缺失不影响记录本身展示
+            }
+        }
+
+        Date startTime = deptTask != null && deptTask.getStartTime() != null
+                ? deptTask.getStartTime() : record.getCreateTime();
+        String bizStatus = record.getStatus();
+
+        Map<String, Object> vo = new LinkedHashMap<>();
+        // 任务ID 缺失（回填前的历史数据）时用业务记录ID 兜底：前端只要求稳定唯一键
+        vo.put("taskId", record.getCamundaTaskId() != null ? record.getCamundaTaskId() : record.getId());
+        vo.put("taskDefKey", BizCommTask.buildCommTaskKey(sourceKey));
+        vo.put("name", deptTask != null && deptTask.getName() != null ? deptTask.getName() : "部门沟通");
+        // 部门沟通的办理人由部门成员认领，未认领时为空；前端回落显示 targetName
+        vo.put("assignee", deptTask == null ? null : deptTask.getAssignee());
+        vo.put("initiator", initiator);
+        vo.put("targetId", record.getTargetId());
+        vo.put("targetName", record.getTargetName());
+        vo.put("targetType", record.getTargetType());
+        vo.put("isFollowUp", record.getParentCommTaskId() != null);
+        vo.put("parentCommTaskId", record.getParentCommTaskId());
+        vo.put("rootTaskId", record.getRootTaskId() != null
+                ? record.getRootTaskId() : record.getSourceTaskId());
+        vo.put("camundaTaskId", record.getCamundaTaskId());
+        vo.put("deptProcInstId", record.getDeptProcInstId());
+        vo.put("status", bizStatus);
+        vo.put("pending", BizCommTask.STATUS_PENDING.equals(bizStatus));
+        // 部门任务还在、但没人认领：沟通面板与节点明细用同一口径，
+        // 否则一边写「待认领」、另一边只显示部门名，仍会被当成“已有人在处理”。
+        boolean deptUnassigned = deptTask != null && deptTask.getEndTime() == null
+                && (deptTask.getAssignee() == null || deptTask.getAssignee().isBlank());
+        vo.put("pendingClaim", deptUnassigned);
+        List<String> candidateNames = new ArrayList<>();
+        if (record.getTargetName() != null && !record.getTargetName().isBlank()) {
+            candidateNames.add(record.getTargetName());
+        } else if (record.getTargetId() != null && !record.getTargetId().isBlank()) {
+            candidateNames.add(record.getTargetId());
+        }
+        vo.put("candidateGroupNames", candidateNames);
+        vo.put("withdrawn", false);
+        vo.put("content", record.getContent());
+        vo.put("replyContent", record.getReplyContent());
+        vo.put("replyUserId", record.getReplyUserId());
+        vo.put("replyTime", record.getReplyTime());
+        vo.put("withdrawTime", record.getWithdrawTime());
+        vo.put("startTime", startTime);
+        vo.put("endTime", deptTask == null ? null : deptTask.getEndTime());
+        vo.put("createTime", record.getCreateTime() != null ? record.getCreateTime() : startTime);
+        vo.put("durationInMillis", deptTask == null ? null : deptTask.getDurationInMillis());
         return vo;
     }
 
@@ -1148,5 +1538,33 @@ public class ProcessTraceService {
         private String source;
         private String target;
         private final List<Map<String, Object>> waypoints = new ArrayList<>();
+    }
+
+    /** 一个任务实例的候选范围与待认领状态 */
+    private static class CandidateInfo {
+        private final Set<String> groupIds = new LinkedHashSet<>();
+        private final Set<String> groupNames = new LinkedHashSet<>();
+        private final Set<String> userIds = new LinkedHashSet<>();
+        private boolean pendingClaim;
+    }
+
+    /**
+     * 候选部门的兜底结果：名称列表 + 值取自哪一级。
+     *
+     * <p>单独带 {@code source} 是为了让诊断日志能区分“身份链接给出来的候选”和
+     * “变量兜底补上的候选” —— 后者只解决展示，任务本身未必可认领。</p>
+     */
+    private static class DeptCandidates {
+        private final List<String> names;
+        private final String source;
+
+        private DeptCandidates(List<String> names, String source) {
+            this.names = names == null ? Collections.emptyList() : names;
+            this.source = source;
+        }
+
+        private static DeptCandidates none(String reason) {
+            return new DeptCandidates(Collections.emptyList(), reason);
+        }
     }
 }

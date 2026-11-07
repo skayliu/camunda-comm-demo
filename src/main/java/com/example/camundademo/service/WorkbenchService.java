@@ -111,6 +111,28 @@ public class WorkbenchService {
                 .taskAssignee(userId)
                 .orderByTaskCreateTime().desc()
                 .list();
+        // 部门沟通的任务是“候选组”任务：未认领前 assignee 为空，部门成员的待办里看不到。
+        // 这里补上“我能认领的部门沟通任务”，进入详情后由反馈接口认领并提交意见。
+        // 只查部门沟通节点，避免把其它流程的候选任务一并带出来。
+        java.util.Map<String, Task> merged = new java.util.LinkedHashMap<>();
+        for (Task t : tasks) {
+            merged.put(t.getId(), t);
+        }
+        List<Task> candidateDeptTasks = taskService.createTaskQuery()
+                .taskCandidateUser(userId)
+                .taskDefinitionKey(BizCommTask.DEPT_TASK_KEY)
+                .orderByTaskCreateTime().desc()
+                .list();
+        for (Task t : candidateDeptTasks) {
+            merged.putIfAbsent(t.getId(), t);
+        }
+        tasks = new ArrayList<>(merged.values());
+        tasks.sort((a, b) -> {
+            java.util.Date ta = a.getCreateTime();
+            java.util.Date tb = b.getCreateTime();
+            if (ta == null || tb == null) return 0;
+            return tb.compareTo(ta);
+        });
 
         String kw = keyword == null ? "" : keyword.trim().toLowerCase();
         int approvalCount = 0;
@@ -312,7 +334,7 @@ public class WorkbenchService {
         vo.put("processDefinitionName", pd == null ? null : pd.getName());
 
         Map<String, Object> vars = safeVariables(t.getProcessInstanceId());
-        vo.put("applicant", vars.get("applicant"));
+        vo.put("applicant", resolveApplicant(vars, startUserIdOf(t.getProcessInstanceId())));
         vo.put("processTitle", vars.get("title") != null
                 ? vars.get("title")
                 : (pd == null ? "审批流程" : pd.getName()));
@@ -327,6 +349,8 @@ public class WorkbenchService {
                     : BizCommTask.parseSourceTaskDefKey(t.getTaskDefinitionKey()));
             vo.put("commInitiator", commInitiator(record.getSessionId()));
             vo.put("commContent", record.getContent());
+            vo.put("targetType", record.getTargetType());
+            vo.put("targetName", record.getTargetName());
             vo.put("myCommStatus", record.getStatus());
         }
         return vo;
@@ -379,7 +403,7 @@ public class WorkbenchService {
             vo.put("durationInMillis", t.getDurationInMillis());
             vo.put("deleteReason", normalizeTaskDeleteReason(t.getDeleteReason()));
             Map<String, Object> vars = safeVariables(t.getProcessInstanceId());
-            vo.put("applicant", vars.get("applicant"));
+            vo.put("applicant", resolveApplicant(vars, startUserIdOf(t.getProcessInstanceId())));
             vo.put("processTitle", vars.get("title") != null
                     ? vars.get("title")
                     : (pd == null ? "审批流程" : pd.getName()));
@@ -434,7 +458,7 @@ public class WorkbenchService {
             vo.put("deleteReason", hpi.getDeleteReason());
 
             Map<String, Object> vars = safeVariables(hpi.getId());
-            vo.put("applicant", vars.get("applicant"));
+            vo.put("applicant", resolveApplicant(vars, hpi.getStartUserId()));
             vo.put("processTitle", vars.get("title") != null
                     ? vars.get("title")
                     : (pd == null ? "审批流程" : pd.getName()));
@@ -480,17 +504,69 @@ public class WorkbenchService {
                 .processDefinitionId(processDefinitionId).singleResult();
     }
 
+    /**
+     * 流程变量：运行期优先，取不到再回退历史变量。
+     *
+     * <p>原先只查 {@code runtimeService}，流程一结束就返回空 map，「我的已办」里
+     * 已办结任务的申请人和流程标题会整列变空——历史变量在引擎里是有的，只是不在运行期表。</p>
+     */
     private Map<String, Object> safeVariables(String processInstanceId) {
         if (processInstanceId == null) {
             return Collections.emptyMap();
         }
         try {
             Map<String, Object> vars = runtimeService.getVariables(processInstanceId);
-            return vars == null ? Collections.emptyMap() : vars;
+            if (vars != null && !vars.isEmpty()) {
+                return vars;
+            }
         } catch (RuntimeException e) {
-            // 流程已结束：运行期变量取不到，返回空即可，不阻断列表渲染
+            // 流程已结束：运行期变量取不到，继续尝试历史变量
+        }
+        try {
+            Map<String, Object> vars = new LinkedHashMap<>();
+            for (org.camunda.bpm.engine.history.HistoricVariableInstance v
+                    : historyService.createHistoricVariableInstanceQuery()
+                    .processInstanceId(processInstanceId).list()) {
+                vars.put(v.getName(), v.getValue());
+            }
+            return vars;
+        } catch (RuntimeException e) {
             return Collections.emptyMap();
         }
+    }
+
+    /**
+     * 列表「发起人」列的取值。
+     *
+     * <p>三张列表原先只读流程变量 {@code applicant}，这带来两个空洞：
+     * 部门沟通子流程只写了 {@code initiator}（修复前），以及引擎里本来就没有该变量的流程，
+     * 两者都会显示成空。这里按「申请人变量 → 实例发起人 START_USER_ID_ → initiator 变量」
+     * 依次回退，任一命中即可显示。</p>
+     */
+    private Object resolveApplicant(Map<String, Object> vars, String startUserId) {
+        Object applicant = vars.get("applicant");
+        if (isBlank(applicant)) {
+            applicant = startUserId;
+        }
+        if (isBlank(applicant)) {
+            applicant = vars.get("initiator");
+        }
+        return isBlank(applicant) ? null : applicant;
+    }
+
+    private boolean isBlank(Object value) {
+        return value == null || String.valueOf(value).trim().isEmpty();
+    }
+
+    /** 流程实例的发起人（START_USER_ID_）；实例不存在时返回 null */
+    private String startUserIdOf(String processInstanceId) {
+        if (processInstanceId == null) {
+            return null;
+        }
+        HistoricProcessInstance hpi = historyService.createHistoricProcessInstanceQuery()
+                .processInstanceId(processInstanceId)
+                .singleResult();
+        return hpi == null ? null : hpi.getStartUserId();
     }
 
     /**

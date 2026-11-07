@@ -37,6 +37,9 @@ public class CommQueryService {
     @Autowired
     private ProcessEngine processEngine;
 
+    @Autowired
+    private org.camunda.bpm.engine.IdentityService identityService;
+
     private ProcessEngineConfigurationImpl getEngineConfig() {
         return (ProcessEngineConfigurationImpl) processEngine.getProcessEngineConfiguration();
     }
@@ -51,7 +54,6 @@ public class CommQueryService {
             BizCommSessionManager sessionMgr = commandContext.getSession(BizCommSessionManager.class);
             BizCommTaskManager taskMgr = commandContext.getSession(BizCommTaskManager.class);
 
-            BizTaskExt ext = extMgr.findByTaskId(taskId);
             Map<String, Object> vo = new LinkedHashMap<>();
             vo.put("taskId", taskId);
 
@@ -62,11 +64,21 @@ public class CommQueryService {
             boolean isFollowUp = false;
             BizCommTask selfRecord = null;
             if (isCommTask) {
-                selfRecord = taskMgr.findByCamundaTaskId(taskId);
+                selfRecord = resolveCommRecord(taskMgr, taskId, task);
                 isFollowUp = selfRecord != null && selfRecord.getParentCommTaskId() != null;
             }
             vo.put("isFollowUp", isFollowUp);
 
+            // 沟通待办的真实根待办不一定是它自己：部门沟通由独立子流程承接，
+            // dept_handle 是子流程里的任务，会话与扩展记录都挂在源待办上。
+            // 后面一律按根待办查会话与扩展记录，否则部门任务永远查不到（表现为 commTasks 为空）。
+            String rootTaskId = selfRecord != null && selfRecord.getRootTaskId() != null
+                    ? selfRecord.getRootTaskId() : taskId;
+
+            BizTaskExt ext = extMgr.findByTaskId(taskId);
+            if (ext == null && !taskId.equals(rootTaskId)) {
+                ext = extMgr.findByTaskId(rootTaskId);
+            }
             String bizStatus = ext == null ? BizTaskExt.STATUS_NORMAL : ext.getBizStatus();
             String activeSessionId = ext == null ? null : ext.getActiveSessionId();
             vo.put("bizStatus", bizStatus);
@@ -75,9 +87,10 @@ public class CommQueryService {
                     && currentUserId != null && currentUserId.equals(task.getAssignee()));
             // 沟通待办本身也能“再发起沟通”：由当前沟通对象把问题转给其他人补充核实，
             // 新记录挂在当前沟通记录下，仍属于同一会话（见 CommTaskFactory#forwardCommunication）。
+            // 部门沟通的“当前对象”是整个部门，任何部门成员都可以再发起。
             vo.put("canForwardComm", isCommTask && selfRecord != null
                     && BizCommTask.STATUS_PENDING.equals(selfRecord.getStatus())
-                    && currentUserId != null && currentUserId.equals(selfRecord.getTargetId()));
+                    && isTargetOperator(selfRecord, currentUserId));
             vo.put("canWithdraw", false);
             vo.put("activeSessionId", activeSessionId);
 
@@ -90,13 +103,13 @@ public class CommQueryService {
                 sessionActive = session != null;
             }
             if (session == null) {
-                session = sessionMgr.findLatestByRootTask(taskId);
+                session = sessionMgr.findLatestByRootTask(rootTaskId);
                 sessionActive = false;
             }
 
             // 同一待办可以先后发起多次沟通，每次“发起沟通”都会生成一个新会话。
             // 审批界面不能只回“当前/最新一次”，否则前面几轮沟通会整体消失。
-            List<BizCommSession> allSessions = sessionMgr.findByRootTask(taskId);
+            List<BizCommSession> allSessions = sessionMgr.findByRootTask(rootTaskId);
             if (allSessions == null || allSessions.isEmpty()) {
                 allSessions = session == null
                         ? Collections.emptyList() : Collections.singletonList(session);
@@ -125,7 +138,7 @@ public class CommQueryService {
                 List<Map<String, Object>> sessionTaskVOList = new ArrayList<>();
                 for (BizCommTask ct : tasksBySession.getOrDefault(s.getId(), Collections.emptyList())) {
                     Map<String, Object> tvo = toCommTaskVO(ct, s, seq, sessionIsActive,
-                            recordById, currentUserId, taskId);
+                            recordById, currentUserId, rootTaskId);
                     sessionTaskVOList.add(tvo);
                     allTaskVOList.add(tvo);
                 }
@@ -178,7 +191,7 @@ public class CommQueryService {
             String replyBlockedBy = null;
             if (isCommTask && selfRecord != null
                     && BizCommTask.STATUS_PENDING.equals(selfRecord.getStatus())
-                    && currentUserId != null && currentUserId.equals(selfRecord.getTargetId())) {
+                    && isTargetOperator(selfRecord, currentUserId)) {
                 List<BizCommTask> selfSessionTasks = tasksBySession.get(selfRecord.getSessionId());
                 if (selfSessionTasks == null) {
                     selfSessionTasks = taskMgr.findBySessionId(selfRecord.getSessionId());
@@ -268,6 +281,23 @@ public class CommQueryService {
         return task == null ? null : task.getTaskDefinitionKey();
     }
 
+    /**
+     * 当前用户是否就是这条沟通的“接收方”。
+     * <p>USER 是接收人本人；DEPT 是部门成员（部门内任意成员都有反馈权）。</p>
+     */
+    private boolean isTargetOperator(BizCommTask record, String userId) {
+        if (record == null || userId == null) {
+            return false;
+        }
+        if (BizCommTask.TARGET_DEPT.equals(record.getTargetType())) {
+            return record.getTargetId() != null && identityService.createUserQuery()
+                    .userId(userId)
+                    .memberOfGroup(record.getTargetId())
+                    .count() > 0;
+        }
+        return userId.equals(record.getTargetId());
+    }
+
     // ===== 待办中心用的只读查询 =====
 
     /**
@@ -275,10 +305,37 @@ public class CommQueryService {
      * 任务ID 存在 {@code CAMUNDA_TASK_ID_}；{@code DEPT_PROC_INST_ID_} 已成部门子流程实例ID 专用列。
      */
     public BizCommTask getCommRecordByCamundaTaskId(String camundaTaskId) {
+        if (camundaTaskId == null || camundaTaskId.isEmpty()) {
+            return null;
+        }
+        // 任务在命令外先取出来：resolveCommRecord 需要它的流程实例ID 做兜底
+        Task task = taskService.createTaskQuery().taskId(camundaTaskId).singleResult();
         return getEngineConfig().getCommandExecutorTxRequired().execute(
-                (Command<BizCommTask>) commandContext -> commandContext
-                        .getSession(BizCommTaskManager.class)
-                        .findByCamundaTaskId(camundaTaskId));
+                (Command<BizCommTask>) commandContext -> resolveCommRecord(
+                        commandContext.getSession(BizCommTaskManager.class), camundaTaskId, task));
+    }
+
+    /**
+     * 按任务ID 取沟通记录；取不到时用任务所在流程实例ID 再查一次。
+     *
+     * <p>部门沟通走独立子流程，沟通记录是在<b>同一个 Camunda 命令内</b>插入业务表的，
+     * 此时 dept_handle 任务还没 flush，拿不到任务ID，{@code CAMUNDA_TASK_ID_} 只能落空。
+     * mapper 同时按 {@code DEPT_PROC_INST_ID_} 匹配，所以用子流程实例ID 即可反查到这条记录。
+     * 没有这层兜底，部门成员在沟通待办上「再发起沟通」永远不可用、待办里的
+     * {@code targetType} 也为空。</p>
+     */
+    private BizCommTask resolveCommRecord(BizCommTaskManager taskMgr, String taskId, Task task) {
+        BizCommTask record = taskMgr.findByCamundaTaskId(taskId);
+        if (record != null) {
+            return record;
+        }
+        String procInstId = task == null ? null : task.getProcessInstanceId();
+        // 业务主流程的任务也带实例ID，但那里没有部门记录，多查一次不会有副作用；
+        // 仅排除实例ID 与任务ID 相同这种无意义查询
+        if (procInstId == null || procInstId.equals(taskId)) {
+            return null;
+        }
+        return taskMgr.findByCamundaTaskId(procInstId);
     }
 
     /** 查会话内全部沟通记录（用于展示同一轮其他对象的反馈进度） */

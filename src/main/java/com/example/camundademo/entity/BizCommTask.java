@@ -31,6 +31,13 @@ public class BizCommTask implements DbEntity, Serializable {
     private static final String LEGACY_TASK_KEY = "COMM";
 
     /**
+     * 部门沟通子流程的处理节点 key（与 dept_communication.bpmn 的 userTask id 一致）。
+     * 部门沟通没有旁路任务，任务来自独立流程实例，但对待办中心、代理规则、
+     * 审批按钮而言它同样是“沟通任务”，必须和 "#COMM" 一样被识别。
+     */
+    public static final String DEPT_TASK_KEY = "dept_handle";
+
+    /**
      * 构造沟通旁路任务的 taskDefinitionKey：源节点 key + #COMM
      */
     public static String buildCommTaskKey(String sourceTaskDefinitionKey) {
@@ -46,7 +53,8 @@ public class BizCommTask implements DbEntity, Serializable {
     public static boolean isCommTaskKey(String taskDefinitionKey) {
         return taskDefinitionKey != null
                 && (LEGACY_TASK_KEY.equals(taskDefinitionKey)
-                    || taskDefinitionKey.endsWith(TASK_KEY_SUFFIX));
+                    || taskDefinitionKey.endsWith(TASK_KEY_SUFFIX)
+                    || DEPT_TASK_KEY.equals(taskDefinitionKey));
     }
 
     /**
@@ -98,9 +106,9 @@ public class BizCommTask implements DbEntity, Serializable {
      */
     protected String camundaTaskId;
     /**
-     * 部门沟通过程中启动的子流程实例 ID。
-     * <b>预留给「部门沟通子流程」，当前恒为 null</b>：早期曾把旁路任务 ID 塞进这里临时存放，
-     * 已迁移到 {@link #camundaTaskId}。做成部门子流程时直接写这里，两个含义不再互相打架。
+     * 部门沟通子流程实例 ID（沟通对象类型为 DEPT 时才有值）。
+     * 收回沟通、主流程结束级联终止都靠它定位整个子流程；
+     * 与 {@link #camundaTaskId}（子流程内 dept_handle 的任务ID）各归各位。
      */
     protected String deptProcInstId;
     protected Date createTime;
@@ -113,6 +121,10 @@ public class BizCommTask implements DbEntity, Serializable {
         state.put("replyUserId", replyUserId);
         state.put("replyTime", replyTime);
         state.put("withdrawTime", withdrawTime);
+        // 部门沟通子流程是「先落记录、再启动流程」，实例ID 与部门任务ID
+        // 都在 insert 之后才能拿到，必须参与脏检查，否则第二次 update 不会发 SQL
+        state.put("camundaTaskId", camundaTaskId);
+        state.put("deptProcInstId", deptProcInstId);
         return state;
     }
 

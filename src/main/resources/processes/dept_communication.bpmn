@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+                  id="Definitions_DeptComm"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+
+    <!--
+      部门沟通子流程。
+
+      触发时机：沟通对象类型为 DEPT 时，由 CommTaskFactory 启动本流程，
+      业务主键（businessKey）为 BIZ_COMM_TASK_.ID_。
+
+      处理方式：dept_handle 使用候选组（候选组 = 部门ID，即 Camunda Identity 的 group），
+      部门内任意成员认领后填写意见并完成。完成任务时由 DeptCommReplyListener 回写业务表：
+        - BIZ_COMM_TASK_.STATUS_ 置 REPLIED，记录反馈内容、反馈人、反馈时间
+        - 会话内没有其它待反馈记录时解锁源待办
+      流程实例ID 同时写入 BIZ_COMM_TASK_.DEPT_PROC_INST_ID_，收回时按该ID 结束整个子流程。
+    -->
+    <bpmn:process id="dept_communication" name="部门沟通子流程" isExecutable="true"
+                  camunda:historyTimeToLive="180">
+        <bpmn:documentation>沟通对象为部门时启动；部门内任意成员认领后提交意见，回写沟通记录。</bpmn:documentation>
+
+        <bpmn:startEvent id="dept_start" name="发起部门沟通">
+            <bpmn:outgoing>dept_flow1</bpmn:outgoing>
+        </bpmn:startEvent>
+
+        <bpmn:userTask id="dept_handle" name="部门沟通处理"
+                       camunda:candidateGroups="${deptId}">
+            <bpmn:documentation>候选组为部门ID；认领后填写部门意见，完成后由监听器回写沟通记录。</bpmn:documentation>
+            <bpmn:extensionElements>
+                <camunda:taskListener event="complete" delegateExpression="${deptCommReplyListener}"/>
+                <camunda:formData>
+                    <camunda:formField id="deptReply" label="部门意见" type="string"/>
+                </camunda:formData>
+            </bpmn:extensionElements>
+            <bpmn:incoming>dept_flow1</bpmn:incoming>
+            <bpmn:outgoing>dept_flow2</bpmn:outgoing>
+        </bpmn:userTask>
+
+        <bpmn:endEvent id="dept_end" name="部门沟通结束">
+            <bpmn:incoming>dept_flow2</bpmn:incoming>
+        </bpmn:endEvent>
+
+        <bpmn:sequenceFlow id="dept_flow1" sourceRef="dept_start" targetRef="dept_handle"/>
+        <bpmn:sequenceFlow id="dept_flow2" sourceRef="dept_handle" targetRef="dept_end"/>
+    </bpmn:process>
+
+    <bpmndi:BPMNDiagram id="BPMNDiagram_DeptComm">
+        <bpmndi:BPMNPlane id="BPMNPlane_DeptComm" bpmnElement="dept_communication">
+            <bpmndi:BPMNShape id="Shape_dept_start" bpmnElement="dept_start">
+                <dc:Bounds x="60" y="102" width="36" height="36"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_dept_handle" bpmnElement="dept_handle">
+                <dc:Bounds x="150" y="80" width="140" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_dept_end" bpmnElement="dept_end">
+                <dc:Bounds x="350" y="102" width="36" height="36"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNEdge id="Edge_dept_flow1" bpmnElement="dept_flow1">
+                <di:waypoint x="96" y="120"/>
+                <di:waypoint x="150" y="120"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Edge_dept_flow2" bpmnElement="dept_flow2">
+                <di:waypoint x="290" y="120"/>
+                <di:waypoint x="350" y="120"/>
+            </bpmndi:BPMNEdge>
+        </bpmndi:BPMNPlane>
+    </bpmndi:BPMNDiagram>
+
+</bpmn:definitions>

@@ -24,6 +24,24 @@ public class BizCommTaskManager extends AbstractManager implements Session {
         getDbEntityManager().merge(task);
     }
 
+    /**
+     * 回填 {@code CAMUNDA_TASK_ID_}。
+     *
+     * <p>单独走一条 UPDATE，不走 {@link #update(BizCommTask)}：
+     * 后者对应的 SQL 只更新状态/反馈/收回等字段，不含任务ID；
+     * 而实体 merge 会把整行脏检查的结果交回去，容易和 Camunda 的实体缓存互相干扰。</p>
+     *
+     * @return 实际更新行数；记录已有任务ID 或记录不存在时为 0
+     */
+    public int updateCamundaTaskId(String id, String camundaTaskId) {
+        clearQueryCache();
+        Map<String, Object> params = new HashMap<>();
+        params.put("id", id);
+        params.put("camundaTaskId", camundaTaskId);
+        return getDbSqlSession().getSqlSession()
+                .update(MAPPER_NAMESPACE + ".updateCamundaTaskId", params);
+    }
+
     public void deleteById(String id) {
         BizCommTask task = getDbEntityManager().selectById(BizCommTask.class, id);
         if (task != null) {

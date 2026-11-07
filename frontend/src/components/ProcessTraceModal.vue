@@ -755,7 +755,12 @@
               <span>节点类型</span><b>{{ tipNode.typeLabel }}</b>
             </div>
             <div class="trace-tip-row">
-              <span>处理人</span><b>{{ tipNode.assignees.length ? tipNode.assignees.join('、') : '—' }}</b>
+              <span>处理人</span>
+              <b v-if="tipNode.assignees && tipNode.assignees.length">{{ tipNode.assignees.join('、') }}</b>
+              <b v-else-if="tipNode.pendingClaim" class="trace-claim-pending">
+                待认领<span v-if="candidateText(tipNode)">（{{ candidateText(tipNode) }}）</span>
+              </b>
+              <b v-else>—</b>
             </div>
             <div class="trace-tip-row">
               <span>到达时间</span><b>{{ fmt(tipNode.startTime) }}</b>
@@ -850,7 +855,17 @@
                 <a-tag :color="statusColor(record)">{{ statusText(record) }}</a-tag>
               </template>
               <template v-else-if="column.key === 'assignee'">
-                <div>{{ record.assignees.length ? record.assignees.join('、') : '—' }}</div>
+                <div v-if="record.assignees && record.assignees.length">
+                  {{ record.assignees.join('、') }}
+                </div>
+                <!-- 进行中且无人认领：明示「待认领」并附候选部门，避免把「—」当成漏写办理人 -->
+                <div v-else-if="record.pendingClaim" class="trace-claim-cell">
+                  <a-tag color="orange" class="trace-claim-tag">待认领</a-tag>
+                  <span v-if="candidateText(record)" class="trace-claim-candidates">
+                    {{ candidateText(record) }}
+                  </span>
+                </div>
+                <div v-else>—</div>
                 <!-- 转办不会改变任务 ID，只是换了 assignee，所以这里补一条链才能看出「谁交给谁」 -->
                 <div v-if="record.transferCount" class="trace-transfer-line">
                   <a-tag
@@ -940,7 +955,12 @@
                     <div class="trace-comm-meta">
                       <span class="trace-comm-from">{{ item.initiator || '—' }}</span>
                       <span class="trace-comm-arrow">→</span>
-                      <span class="trace-comm-to">{{ item.targetName || item.assignee || '—' }}</span>
+                      <span class="trace-comm-to">
+                        {{ item.targetName || item.assignee || '—' }}
+                        <a-tag v-if="item.pendingClaim" color="orange" class="trace-claim-tag">
+                          待认领
+                        </a-tag>
+                      </span>
                       <span class="trace-comm-time">{{ fmtShort(item.createTime || item.startTime) }}</span>
                     </div>
 
@@ -972,9 +992,8 @@
                       已收回<span v-if="item.withdrawTime">于 {{ fmtShort(item.withdrawTime) }}</span>
                     </div>
 
-                    <!-- 后端已把两个含义拆开：camundaTaskId 存沟通旁路任务ID，
-                         deptProcInstId 预留给部门沟通子流程实例（当前恒为空）。
-                         部门子流程尚未实现，仍在空值时隐藏，避免展示空壳信息。 -->
+                    <!-- camundaTaskId 存沟通旁路任务ID；deptProcInstId 存部门沟通子流程实例ID。
+                         沟通对象为部门时才有后者，空值表示这条沟通不是部门沟通。 -->
                     <div v-if="item.deptProcInstId" class="trace-comm-waiting is-muted">
                       部门流转实例：{{ item.deptProcInstId }}
                     </div>
@@ -1389,7 +1408,7 @@ function exportDetailRows() {
     name: n.name || n.nodeId || '',
     status: statusText(n),
     statusColor: colorOf[statusColor(n)] || EXPORT_COLORS.muted,
-    assignee: n.assignees && n.assignees.length ? n.assignees.join('、') : '—',
+    assignee: assigneeText(n),
     transfer: n.transferCount ? `${n.transferCount} 次 ${n.transferPath || ''}`.trim() : '—',
     start: n.startTime ? fmtShort(n.startTime) : '—',
     end: n.endTime ? fmtShort(n.endTime) : '—',
@@ -2045,7 +2064,12 @@ function shortName(name, max = 7) {
 function subText(node) {
   if (node.assignees && node.assignees.length) return node.assignees[0]
   if (node.status === 'COMPLETED') return '已完成'
-  if (node.status === 'ACTIVE') return node.commLocked ? '沟通中' : '处理中'
+  if (node.status === 'ACTIVE') {
+    if (node.commLocked) return '沟通中'
+    // 图上副标题也区分“等着谁接手”，不要与“办理中”混在一起
+    if (node.pendingClaim) return '待认领'
+    return '处理中'
+  }
   return '未开始'
 }
 
@@ -2061,6 +2085,30 @@ function statusColor(node) {
   if (node.status === 'COMPLETED') return 'green'
   if (node.status === 'ACTIVE') return 'processing'
   return 'default'
+}
+
+// 候选范围：部门沟通的候选组就是部门（groupId → 部门名称由后端解析），人员候选一并列出
+function candidateText(record) {
+  if (!record) return ''
+  const parts = []
+  if (record.candidateGroupNames && record.candidateGroupNames.length) {
+    parts.push(record.candidateGroupNames.join('、'))
+  }
+  if (record.candidateUsers && record.candidateUsers.length) {
+    parts.push(record.candidateUsers.join('、'))
+  }
+  return parts.length ? `候选：${parts.join('、')}` : ''
+}
+
+// 处理人统一口径：有人 → 姓名；进行中且无人认领 → 「待认领（候选：xxx）」；其余 → 「—」。
+// 未认领的「—」与“确实没有办理人”的「—」在视觉上无法区分，正是这次要修掉的地方。
+function assigneeText(record) {
+  if (record && record.assignees && record.assignees.length) return record.assignees.join('、')
+  if (record && record.pendingClaim) {
+    const candidate = candidateText(record)
+    return candidate ? `待认领（${candidate}）` : '待认领'
+  }
+  return '—'
 }
 
 // ===== 沟通 / 转办明细（行内展开） =====
@@ -2150,10 +2198,21 @@ function commSessions(record) {
     const replied = items.some(
       (t) => t.status === 'REPLIED' || t.status === 'FINISHED' || !!t.replyContent
     )
+    // 同一次「发起沟通」可以同时选人员和部门，它们共用 rootTaskId，
+    // 会话组头不能只取第一条的目标，否则部门会被人的名字盖住。
+    const targetNames = []
+    const targetTypes = new Set()
+    items.forEach((t) => {
+      const name = t.targetName || t.assignee || '—'
+      if (!targetNames.includes(name)) targetNames.push(name)
+      if (t.targetType) targetTypes.add(t.targetType)
+    })
     result.push({
       key,
-      targetName: first.targetName || first.assignee || '—',
-      targetTypeText: typeText(first.targetType),
+      targetName: targetNames.length > 1
+        ? `${targetNames[0]} 等 ${targetNames.length} 个对象`
+        : targetNames[0],
+      targetTypeText: targetTypes.size > 1 ? '人员/部门' : typeText(first.targetType),
       statusText: pending ? '待反馈' : replied ? '已反馈' : '已收回',
       dotClass: pending ? 'is-pending' : replied ? 'is-replied' : 'is-withdrawn',
       items
@@ -3019,6 +3078,24 @@ onBeforeUnmount(() => {
   color: #fa8c16;
 }
 /* ===== 转办：明细列、展开链、图上角标 ===== */
+.trace-claim-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+}
+.trace-claim-tag {
+  margin-inline-end: 0;
+  font-size: 12px;
+  line-height: 18px;
+}
+.trace-claim-candidates {
+  font-size: 12px;
+  color: #8c8c8c;
+}
+.trace-claim-pending {
+  color: #d46b08;
+}
 .trace-transfer-line {
   margin-top: 3px;
   display: flex;

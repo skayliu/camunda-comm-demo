@@ -90,7 +90,9 @@
             <a-space :size="6" wrap>
               <span>{{ record.taskName }}</span>
               <a-tag :color="!record.isCommTask ? 'blue' : (record.isFollowUp ? 'gold' : 'purple')">
-                {{ !record.isCommTask ? '审批' : (record.isFollowUp ? '沟通' : '首轮沟通') }}
+                {{ !record.isCommTask ? '审批'
+                  : (record.targetType === 'DEPT' ? '部门沟通'
+                    : (record.isFollowUp ? '沟通' : '首轮沟通')) }}
               </a-tag>
             </a-space>
             <div v-if="record.isCommTask && record.sourceTaskDefKey" class="muted" style="font-size: 12px">
