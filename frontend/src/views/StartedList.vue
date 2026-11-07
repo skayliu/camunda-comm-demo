@@ -63,7 +63,7 @@
                 <a-space :size="6">
                   <span>{{ t.taskName }}</span>
                   <a-tag v-if="t.isCommTask" :color="t.isFollowUp ? 'gold' : 'purple'">
-                    {{ t.isFollowUp ? '追问' : '首轮沟通' }}
+                    {{ t.isFollowUp ? '沟通' : '首轮沟通' }}
                   </a-tag>
                   <span class="muted" style="font-size: 12px">{{ t.assignee }}</span>
                 </a-space>
@@ -151,7 +151,7 @@
                 <div class="comm-target-name">
                   <span>{{ t.taskName }}</span>
                   <a-tag v-if="t.isCommTask" :color="t.isFollowUp ? 'gold' : 'purple'">
-                    {{ t.isFollowUp ? '追问' : '首轮沟通' }}
+                    {{ t.isFollowUp ? '沟通' : '首轮沟通' }}
                   </a-tag>
                 </div>
                 <span class="muted" style="font-size: 12px">处理人 {{ t.assignee }}</span>

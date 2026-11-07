@@ -54,7 +54,7 @@ public class TaskDelegateController {
                 reason == null ? null : String.valueOf(reason));
     }
 
-    /** 受托人提交代办意见并交回（resolveTask），不会结束任务 */
+    /** 受托人提交受托意见并交回（resolveTask），不会结束任务 */
     @PostMapping("/task/{taskId}/delegate/resolve")
     public Map<String, Object> resolve(@PathVariable String taskId,
                                        @RequestBody(required = false) Map<String, Object> req,
@@ -113,13 +113,13 @@ public class TaskDelegateController {
         return taskDelegateService.listByProcessInstanceId(processInstanceId);
     }
 
-    /** 我委托出去的（含已交回 / 已收回） */
+    /** 我的委托（含已交回 / 已收回） */
     @GetMapping("/delegations/out")
     public List<Map<String, Object>> delegatedOut(Authentication authentication) {
         return taskDelegateService.listByOwner(CurrentUser.require(authentication));
     }
 
-    /** 我受托的（含已交回 / 被收回） */
+    /** 我的受托（含已交回 / 被收回） */
     @GetMapping("/delegations/in")
     public List<Map<String, Object>> delegatedIn(Authentication authentication) {
         return taskDelegateService.listByDelegateUser(CurrentUser.require(authentication));

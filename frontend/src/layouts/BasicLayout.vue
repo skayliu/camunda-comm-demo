@@ -151,9 +151,12 @@ function reload() {
   loadCount()
 }
 
-function handleLogout() {
-  logout()
-  router.push({ name: 'login' })
+async function handleLogout() {
+  // 服务端销毁会话（session.invalidate），而不是仅清前端标记
+  await logout()
+  await router.replace({ name: 'login' })
+  // 整页重载：丢掉组件状态、角标与在途请求，避免退回到“看起来还登录着”
+  window.location.reload()
 }
 
 async function loadCount() {

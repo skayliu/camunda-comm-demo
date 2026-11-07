@@ -45,7 +45,7 @@
             <a-space :size="6" wrap>
               <span>{{ record.taskName }}</span>
               <a-tag v-if="record.isCommTask" :color="record.isFollowUp ? 'gold' : 'purple'">
-                {{ record.isFollowUp ? '追问' : '首轮沟通' }}
+                {{ record.isFollowUp ? '沟通' : '首轮沟通' }}
               </a-tag>
               <a-tag v-if="record.transferCount" color="cyan">
                 已转办 {{ record.transferCount }} 次
@@ -98,7 +98,7 @@
               :color="current.isFollowUp ? 'gold' : 'purple'"
               style="margin-left: 6px"
             >
-              {{ current.isFollowUp ? '追问' : '首轮沟通' }}
+              {{ current.isFollowUp ? '沟通' : '首轮沟通' }}
             </a-tag>
           </a-descriptions-item>
           <a-descriptions-item label="发起人">

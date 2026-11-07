@@ -139,7 +139,7 @@ public class GlobalAgentTaskListener implements TaskListener {
         record.setUpdateTime(now);
 
         if (hit.isSignMode()) {
-            // OWNER_ 仍记原办理人：审计能看出“这是谁的活、由谁代办”，收回也据此回到本人
+            // OWNER_ 仍记原办理人：审计能看出“这是谁的活、由谁受托办理”，收回也据此回到本人
             task.setOwner(assignee);
             task.setAssignee(hit.getAgentUserId());
         } else {

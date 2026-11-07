@@ -14,7 +14,7 @@
         show-icon
         style="margin-bottom: 12px"
         :message="taskName ? `当前节点：${taskName}` : '委托待办'"
-        description="委托后责任仍在你名下：对方只能提交代办意见，不能办结；你确认后再审批，也可随时收回。"
+        description="委托后责任仍在你名下：对方只能提交受托意见，不能办结；你确认后再审批，也可随时收回。"
       />
       <a-form-item label="委托给" required>
         <a-select

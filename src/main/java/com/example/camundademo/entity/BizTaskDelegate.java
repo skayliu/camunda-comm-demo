@@ -56,7 +56,7 @@ public class BizTaskDelegate implements DbEntity, Serializable {
     protected String agentRuleId;
     protected String reason;
     protected String status;
-    /** 受托人交回时填写的代办意见，与最终审批意见分开存储 */
+    /** 受托人交回时填写的受托意见，与最终审批意见分开存储 */
     protected String resolveContent;
     protected Date resolveTime;
     protected Date createTime;

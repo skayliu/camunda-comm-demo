@@ -1,6 +1,7 @@
 package com.example.camundademo;
 
 import com.example.camundademo.security.DemoUserInitializer;
+import com.example.camundademo.support.TestSession;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.camunda.bpm.engine.IdentityService;
@@ -22,7 +23,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -118,9 +118,12 @@ class AgentRuleApiTest {
                 .timeout(Duration.ofSeconds(30))
                 .header("Accept", "application/json");
         if (user != null) {
-            String raw = user + ":" + DemoUserInitializer.DEMO_PASSWORD;
-            builder.header("Authorization", "Basic "
-                    + Base64.getEncoder().encodeToString(raw.getBytes(StandardCharsets.UTF_8)));
+            // 会话式登录：先换 JSESSIONID，再放进 Cookie 头
+            builder.header("Cookie", TestSession.cookie(port, user));
+            // 写操作还要带 CSRF 令牌（与 XSRF-TOKEN cookie 成对）
+            if (method != HttpMethod.GET) {
+                builder.header("X-XSRF-TOKEN", TestSession.csrfToken(port, user));
+            }
         }
         if (body == null) {
             builder.method(method.name(), HttpRequest.BodyPublishers.noBody());

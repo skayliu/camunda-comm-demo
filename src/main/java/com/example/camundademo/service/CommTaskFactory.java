@@ -412,10 +412,10 @@ public class CommTaskFactory {
             String newRecordId = UUID.randomUUID().toString().replace("-", "");
 
             TaskEntity commTask = (TaskEntity) taskService.newTask();
-            // 追问同样沿用源待办名称，与源节点保持一致；用 description 保留“追问 + 轮次 + 内容”，
-            // 前端/报表需要区分首轮与追问时读 description，不必依赖任务名
+            // 后续沟通同样沿用源待办名称，与源节点保持一致；用 description 保留“继续沟通 + 轮次 + 内容”，
+            // 前端/报表需要区分首轮与后续沟通时读 description，不必依赖任务名
             commTask.setName(CommChainRules.resolveTaskDisplayName(rootTask));
-            commTask.setDescription("沟通追问（第 " + round + " 轮）：" + content);
+            commTask.setDescription("继续沟通（第 " + round + " 轮）：" + content);
             commTask.setTaskDefinitionKey(BizCommTask.buildCommTaskKey(rootTask.getTaskDefinitionKey()));
             commTask.setParentTaskId(parent.getSourceTaskId());
             if (procInstId != null) {

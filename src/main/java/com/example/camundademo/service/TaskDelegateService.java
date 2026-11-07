@@ -30,7 +30,7 @@ import java.util.UUID;
 /**
  * 待办委托服务。
  *
- * <p><b>委托 vs 转办</b>：转办是责任彻底转移（改派），委托是“请人代办、责任仍在我”。
+ * <p><b>委托 vs 转办</b>：转办是责任彻底转移（改派），委托是“托人办理、责任仍在我”。
  * 委托用 Camunda 原生 {@code delegateTask / resolveTask}，语义与引擎状态完全对齐：</p>
  * <ul>
  *   <li>{@code delegateTask}：OWNER_ 保留原办理人，ASSIGNEE_ 变成受托人，
@@ -38,7 +38,7 @@ import java.util.UUID;
  *   <li>{@code resolveTask}：ASSIGNEE_ 回到 OWNER_，任务重新出现在原办理人的待办里，
  *       只有原办理人能 complete——这是引擎硬约束，也是委托不能被做成“受托人直接办结”的原因；</li>
  *   <li>受托人 resolve 不等于任务结束，因此不会进入任何人的正式已办，
- *       代办意见单独落 {@code BIZ_TASK_DELEGATE_.RESOLVE_CONTENT_}。</li>
+ *       受托意见单独落 {@code BIZ_TASK_DELEGATE_.RESOLVE_CONTENT_}。</li>
  * </ul>
  *
  * <p>所有校验、引擎操作、业务落表都在同一个引擎命令内完成，避免“先查后改”写出
@@ -53,7 +53,7 @@ public class TaskDelegateService {
 
     /**
      * 受托人反馈写进引擎 comment 时加前缀：Camunda 的 comment 没有类型字段，
-     * 用前缀把「代办建议」和「最终审批意见」区分开，避免在时间线上混成一条。
+     * 用前缀把「受托建议」和「最终审批意见」区分开，避免在时间线上混成一条。
      */
     public static final String DELEGATE_COMMENT_PREFIX = "[委托反馈] ";
 
@@ -140,7 +140,7 @@ public class TaskDelegateService {
     }
 
     /**
-     * 受托人提交代办意见并交回：只允许 ASSIGNEE_（受托人）且 DELEGATION_STATE_=PENDING。
+     * 受托人提交受托意见并交回：只允许 ASSIGNEE_（受托人）且 DELEGATION_STATE_=PENDING。
      *
      * <p>这里调的是 {@code resolveTask} 而不是 {@code complete}：
      * 受托人提交后任务回到原办理人待办，由原人确认办结。</p>
@@ -288,7 +288,7 @@ public class TaskDelegateService {
                         .findByProcessInstanceId(processInstanceId)));
     }
 
-    /** 我委托出去的（含已交回/已收回） */
+    /** 我的委托（含已交回/已收回） */
     public List<Map<String, Object>> listByOwner(String ownerUserId) {
         if (ownerUserId == null) {
             return Collections.emptyList();
@@ -335,7 +335,7 @@ public class TaskDelegateService {
         });
     }
 
-    /** 我受托的（含已交回/被收回） */
+    /** 我的受托（含已交回/被收回） */
     public List<Map<String, Object>> listByDelegateUser(String delegateUserId) {
         if (delegateUserId == null) {
             return Collections.emptyList();
@@ -422,7 +422,7 @@ public class TaskDelegateService {
      *
      * <p>委托记录在任务办结后不会删除（要留痕），所以“委托中”不等于“任务还在办”。
      * 这里用一个批量查询回答“任务是否仍在运行”，列表页才能把待办与已办分开：
-     * 状态 PENDING 且 {@code taskActive=true} 才是真的还在代办。</p>
+     * 状态 PENDING 且 {@code taskActive=true} 才是真的还在受托处理中。</p>
      */
     private List<Map<String, Object>> toVOList(List<BizTaskDelegate> records) {
         List<Map<String, Object>> result = new ArrayList<>();

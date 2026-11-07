@@ -90,7 +90,7 @@
             <a-space :size="6" wrap>
               <span>{{ record.taskName }}</span>
               <a-tag :color="!record.isCommTask ? 'blue' : (record.isFollowUp ? 'gold' : 'purple')">
-                {{ !record.isCommTask ? '审批' : (record.isFollowUp ? '追问' : '首轮沟通') }}
+                {{ !record.isCommTask ? '审批' : (record.isFollowUp ? '沟通' : '首轮沟通') }}
               </a-tag>
             </a-space>
             <div v-if="record.isCommTask && record.sourceTaskDefKey" class="muted" style="font-size: 12px">
@@ -100,7 +100,7 @@
               由 {{ record.lastTransfer.from }} 转办
             </div>
             <div v-if="record.delegatedToMe" class="muted" style="font-size: 12px">
-              由 {{ record.lastDelegation.owner }} 委托代办
+              由 {{ record.lastDelegation.owner }} 委托，你受托处理
             </div>
           </template>
 
@@ -240,7 +240,7 @@ const typeOptions = [
   { label: '全部', value: 'all' },
   { label: '审批待办', value: 'approval' },
   { label: '沟通待办', value: 'comm' },
-  { label: '追问', value: 'followup' }
+  { label: '再发起沟通', value: 'followup' }
 ]
 
 const columns = [

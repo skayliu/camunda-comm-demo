@@ -9,11 +9,11 @@
       <div style="display: flex; align-items: center; gap: 8px">
         <span>{{ task.taskName || '待办详情' }}</span>
         <a-tag v-if="task.isCommTask" :color="task.isFollowUp ? 'gold' : 'purple'">
-          {{ task.isFollowUp ? '沟通追问' : '沟通待办' }}
+          沟通
         </a-tag>
         <a-tag v-else color="blue">审批待办</a-tag>
         <a-tag v-if="task.delegationState === 'PENDING'" color="purple">委托中</a-tag>
-        <a-tag v-else-if="task.delegationMode === 'SIGN'" color="geekblue">全权代办</a-tag>
+        <a-tag v-else-if="task.delegationMode === 'SIGN'" color="geekblue">全权受托</a-tag>
         <a-tag v-if="transfers.length" color="cyan">已转办 {{ transfers.length }} 次</a-tag>
       </div>
     </template>
@@ -59,15 +59,15 @@
           type="warning"
           show-icon
           style="margin-bottom: 10px"
-          message="你正在代办此待办"
-          description="提交反馈后任务回到委托人，由委托人确认办结；代办意见会单独记录在委托链上。"
+          message="你正在受托处理此待办"
+          description="提交反馈后任务回到委托人，由委托人确认办结；受托意见会单独记录在委托链上。"
         />
         <a-textarea
           v-model:value="resolveContent"
           :rows="4"
           :maxlength="2000"
           show-count
-          placeholder="填写代办结果与建议"
+          placeholder="填写受托结果与建议"
         />
       </div>
       <a-alert
@@ -102,9 +102,9 @@
               <div v-if="item.depth > 0" class="comm-follow-link">
                 <span class="comm-follow-arrow">↳</span>
                 <span v-if="item.parentName">
-                  转自 <b>{{ item.parentName }}</b> 的沟通
+                  来自 <b>{{ item.parentName }}</b> 的沟通
                 </span>
-                <span v-else>转自上一轮沟通</span>
+                <span v-else>来自上一轮沟通</span>
               </div>
               <div class="comm-target-head">
                 <div class="comm-target-name">
@@ -225,11 +225,11 @@
                 <div v-if="item.depth > 0 || item.isFollowUp" class="comm-follow-link">
                   <span class="comm-follow-arrow">↳</span>
                   <span v-if="item.parentName">
-                    追问自
+                    来自
                     <b>{{ item.parentName }}</b>
-                    的反馈 · 第 {{ item.depth + 1 }} 轮
+                    的沟通 · 第 {{ item.depth + 1 }} 轮
                   </span>
-                  <span v-else>追问 · 承接上一轮沟通</span>
+                  <span v-else>来自上一轮沟通</span>
                   <span v-if="item.parentContent" class="comm-follow-quote">
                     “{{ item.parentContent }}”
                   </span>
@@ -241,7 +241,7 @@
                     </a-avatar>
                     <span>{{ item.targetName || item.targetId }}</span>
                     <span class="mono muted">{{ item.targetId }}</span>
-                    <a-tag v-if="item.depth > 0 || item.isFollowUp" color="gold" style="margin-inline-end: 0">追问</a-tag>
+                    <a-tag v-if="item.depth > 0 || item.isFollowUp" color="gold" style="margin-inline-end: 0">沟通</a-tag>
                   </div>
                   <a-space :size="6">
                     <a-tag :color="statusColor(item.status)">
@@ -262,7 +262,7 @@
                       type="link"
                       @click="openContinue(item)"
                     >
-                      追问
+                      继续沟通
                     </a-button>
                   </a-space>
                 </div>
@@ -378,7 +378,7 @@
         </template>
     </template>
 
-    <!-- 发起 / 追问 沟通 -->
+    <!-- 发起 / 继续沟通 -->
     <template #extra>
     <a-modal
       v-model:open="commModal.open"
@@ -402,8 +402,8 @@
           type="info"
           show-icon
           style="margin-bottom: 12px"
-          message="转交他人补充核实"
-          description="新沟通会挂在这条沟通记录下，审批人可在追问链中看到转交关系。不能转回给发起人或上游沟通对象；你仍可继续填写自己的反馈。"
+          message="向其他人补充沟通"
+          description="新沟通会挂在这条沟通记录下，审批人在沟通记录里能看到它的来源。不能指定发起人或上游沟通对象；你仍可继续填写自己的反馈。"
         />
         <a-form-item label="沟通对象" required>
           <a-select
@@ -489,7 +489,7 @@ function onDelegateDone() {
 
 async function submitResolve() {
   if (!resolveContent.value.trim()) {
-    message.warning('请填写代办反馈')
+    message.warning('请填写受托反馈')
     return
   }
   delegationSubmitting.value = true
@@ -555,7 +555,7 @@ const commTasks = computed(() =>
   Array.isArray(comm.value.commTasks) ? comm.value.commTasks : []
 )
 
-// 追问关系：按 parentCommTaskId 把记录还原成「首轮沟通 → 追问 → 再追问」的树，
+// 沟通层级：按 parentCommTaskId 把记录还原成「首轮沟通 → 后续沟通 → 再后续」的树，
 // 再按时间顺序展开成带层级的扁平列表，供模板缩进渲染（与流程跟踪页保持一致）
 function buildCommTree(source) {
   const list = (source || [])
@@ -564,8 +564,8 @@ function buildCommTree(source) {
   const byId = new Map(list.map((t) => [t.id, t]))
   const children = new Map()
   const roots = []
-  // 有 parentCommTaskId 但父记录不在本次返回里的追问：
-  // 不能当成首轮沟通（会丢掉追问关系），用后端带回的父级快照单独保留层级。
+  // 有 parentCommTaskId 但父记录不在本次返回里的后续沟通：
+  // 不能当成首轮沟通（会丢掉层级关系），用后端带回的父级快照单独保留层级。
   const orphans = []
   list.forEach((task) => {
     const parent = task.parentCommTaskId ? byId.get(task.parentCommTaskId) : null
@@ -638,7 +638,7 @@ const commSessions = computed(() => {
 // 追平层：所有会话的记录合集（保留给需要平铺判断的场景）
 const commTree = computed(() => commSessions.value.flatMap((s) => s.tree))
 
-// 沟通反馈界面：同一会话内的记录也按父链展开，转交/追问关系才看得出来
+// 沟通反馈界面：同一会话内的记录也按父链展开，来源/层级关系才看得出来
 const commPeerTree = computed(() => buildCommTree(task.value.sessionTasks || []))
 
 // 待反馈对象只统计进行中的会话，历史会话的残留状态不参与锁定判断
@@ -660,7 +660,7 @@ const lockDescription = computed(() => {
     .join('、')}。需全部反馈或全部收回后才能审批。`
 })
 
-// 发起 / 追问
+// 发起 / 继续沟通
 const commModal = reactive({ open: false, mode: 'start', parentId: null, title: '', appendMode: false })
 const commForm = reactive({ targets: [], content: '' })
 const commSubmitting = ref(false)
@@ -769,19 +769,19 @@ async function openContinue(item) {
   await ensureTargets()
   commModal.mode = 'continue'
   commModal.parentId = item.id
-  commModal.title = `追问：${item.targetName || item.targetId}`
+  commModal.title = `继续沟通：${item.targetName || item.targetId}`
   commForm.targets = [item.targetId]
   commForm.content = ''
   commModal.open = true
 }
 
-// 沟通反馈界面：以当前沟通记录为父，把问题转给其他人补充核实
+// 沟通反馈界面：以当前沟通记录为父，向其他人再发起一条沟通
 async function openForward() {
   await ensureTargets()
   commModal.mode = 'forward'
   commModal.parentId = task.value.commRecordId
   commModal.appendMode = false
-  commModal.title = '发起沟通（转交他人）'
+  commModal.title = '发起沟通'
   commForm.targets = []
   commForm.content = ''
   commModal.open = true
@@ -832,10 +832,10 @@ async function submitComm() {
         targets: buildTargets()
       })
       if (res && res.error) {
-        message.warning(res.message || '无法发送追问')
+        message.warning(res.message || '无法继续沟通')
         return
       }
-      message.success('追问已发送')
+      message.success('继续沟通已发送')
     } else {
       // forward：沟通对象本人把这条沟通转给他人，同一会话内形成子记录
       const res = await commApi.forward({

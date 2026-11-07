@@ -2134,7 +2134,7 @@ function commTagText(record) {
   return withdrawn ? `${base}（已收回 ${withdrawn}）` : base
 }
 
-// 同一 rootTaskId 视为一次沟通会话；追问（有 parentCommTaskId）在会话内按时间排在后面并缩进
+// 同一 rootTaskId 视为一次沟通会话；后续沟通（有 parentCommTaskId）在会话内按时间排在后面并缩进
 function commSessions(record) {
   const tasks = (record.commTasks || []).slice().sort((a, b) => timeOf(a) - timeOf(b))
   const groups = new Map()

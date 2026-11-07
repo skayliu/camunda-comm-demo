@@ -59,6 +59,13 @@
             </a-input-password>
           </a-form-item>
           <a-alert
+            v-if="notice"
+            type="warning"
+            :message="notice"
+            show-icon
+            style="margin-bottom: 16px"
+          />
+          <a-alert
             v-if="error"
             type="error"
             :message="error"
@@ -109,7 +116,20 @@ const form = reactive({ user: 'manager', password: 'demo' })
 const loading = ref(false)
 const error = ref('')
 
+/**
+ * 被其它设备顶下线时的提示。
+ * 由 axios 401 拦截器写入 sessionStorage，这里读完即删，避免下次刷新还挂着。
+ */
+const notice = ref('')
+try {
+  notice.value = sessionStorage.getItem('wb-kicked') || ''
+  sessionStorage.removeItem('wb-kicked')
+} catch (e) {
+  notice.value = ''
+}
+
 function fill(name) {
+  notice.value = ''
   form.user = name
   form.password = 'demo'
   error.value = ''
@@ -117,6 +137,7 @@ function fill(name) {
 
 async function submit() {
   error.value = ''
+  notice.value = ''
   if (!form.user || !form.password) {
     error.value = '请输入账号与密码'
     return

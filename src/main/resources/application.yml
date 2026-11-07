@@ -37,3 +37,11 @@ camunda.bpm:
 
 server:
   port: 8080
+  servlet:
+    session:
+      # 会话式登录：密码只在登录时出现一次，之后凭 JSESSIONID 识别身份。
+      # 30 分钟无操作即失效，避免“关了页面凭据还长期有效”。
+      timeout: 30m
+      cookie:
+        http-only: true
+        same-site: lax

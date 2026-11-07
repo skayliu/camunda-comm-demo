@@ -48,12 +48,12 @@ public class BizTaskDelegateManager extends AbstractManager implements Session {
         return selectList(MAPPER_NAMESPACE + ".selectByProcessInstanceId", processInstanceId);
     }
 
-    /** 我委托出去的（含已交回/已收回，用于「我的委托」列表） */
+    /** 我的委托（含已交回/已收回） */
     public List<BizTaskDelegate> findByOwner(String ownerUserId) {
         return selectList(MAPPER_NAMESPACE + ".selectByOwner", ownerUserId);
     }
 
-    /** 我受托的（全部状态，前端按 status 分组） */
+    /** 我的受托（全部状态，前端按 status 分组） */
     public List<BizTaskDelegate> findByDelegateUser(String delegateUserId) {
         return selectList(MAPPER_NAMESPACE + ".selectByDelegateUser", delegateUserId);
     }

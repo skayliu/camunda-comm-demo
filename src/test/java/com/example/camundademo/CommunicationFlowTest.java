@@ -2,6 +2,7 @@ package com.example.camundademo;
 
 import com.example.camundademo.entity.BizCommTask;
 import com.example.camundademo.security.DemoUserInitializer;
+import com.example.camundademo.support.TestSession;
 import com.fasterxml.jackson.core.type.TypeReference;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -19,7 +20,6 @@ import org.springframework.http.ResponseEntity;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +41,9 @@ class CommunicationFlowTest {
     @Autowired
     private TestRestTemplate rest;
 
+    @org.springframework.boot.test.web.server.LocalServerPort
+    private int port;
+
     @Autowired
     private org.camunda.bpm.engine.TaskService engineTaskService;
 
@@ -49,14 +52,42 @@ class CommunicationFlowTest {
 
     // ===== HTTP 辅助 =====
 
+    /**
+     * 会话式登录：先 POST /api/auth/login 换到 JSESSIONID，再把 Cookie 放进请求头。
+     * 不再携带 Authorization: Basic。
+     */
     private HttpHeaders authHeaders(String user) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         if (user != null) {
-            String raw = user + ":" + DemoUserInitializer.DEMO_PASSWORD;
-            headers.set(HttpHeaders.AUTHORIZATION, "Basic "
-                    + Base64.getEncoder().encodeToString(raw.getBytes(StandardCharsets.UTF_8)));
+            headers.set(HttpHeaders.COOKIE, TestSession.cookie(port, user));
+            // 写操作需要 CSRF 令牌；这里统一加上，GET 多一个头不影响
+            headers.set("X-XSRF-TOKEN", TestSession.csrfToken(port, user));
         }
+        return headers;
+    }
+
+    /**
+     * 取一份匿名 CSRF 令牌，把 {@code XSRF-TOKEN} cookie 与 {@code X-XSRF-TOKEN}
+     * 请求头都补进 headers。用于“未登录用户发写请求”这类必须绕过 CSRF 前置校验、
+     * 才能验证到认证链路的场景。
+     */
+    private HttpHeaders anonymousCsrf(HttpHeaders base) {
+        ResponseEntity<String> resp = rest.exchange("/api/auth/csrf", HttpMethod.GET,
+                new HttpEntity<>(new HttpHeaders()), String.class);
+        String token;
+        try {
+            token = objectMapper.readTree(resp.getBody()).path("token").asText();
+        } catch (Exception e) {
+            throw new IllegalStateException("解析 CSRF 令牌失败: " + resp.getBody(), e);
+        }
+        HttpHeaders headers = new HttpHeaders();
+        headers.addAll(base);
+        String setCookie = resp.getHeaders().getFirst(HttpHeaders.SET_COOKIE);
+        if (setCookie != null) {
+            headers.set(HttpHeaders.COOKIE, setCookie.split(";", 2)[0]);
+        }
+        headers.set("X-XSRF-TOKEN", token);
         return headers;
     }
 
@@ -695,8 +726,8 @@ class CommunicationFlowTest {
                     "追问记录应继承会话发起节点: " + t);
         }
 
-        // 追问任务同样沿用源待办名称，靠 description 区分“追问 + 轮次 + 内容”，
-        // 这样待办列表里追问项与源节点同名，不会出现“沟通追问：…”这类与节点名不一致的标题
+        // 后续沟通任务同样沿用源待办名称，靠 description 区分“继续沟通 + 轮次 + 内容”，
+        // 这样待办列表里后续沟通项与源节点同名，不会出现“继续沟通：…”这类与节点名不一致的标题
         List<org.camunda.bpm.engine.task.Task> followUpTasks = engineTaskService.createTaskQuery()
                 .processInstanceId(pid)
                 .taskDefinitionKeyLike("%" + BizCommTask.TASK_KEY_SUFFIX)
@@ -707,10 +738,10 @@ class CommunicationFlowTest {
         String followUpSourceName = engineTaskService.createTaskQuery().taskId(managerTaskId).singleResult().getName();
         assertEquals(followUpSourceName, followUp.getName(),
                 "追问任务名称应沿用源待办名称: " + dumpAllTasks());
-        assertTrue(followUp.getDescription() != null && followUp.getDescription().contains("追问"),
-                "追问任务描述应能区分追问: " + followUp.getDescription());
-        assertTrue(followUp.getDescription().contains("第 2 轮"),
-                "追问任务描述应包含轮次: " + followUp.getDescription());
+        assertTrue(followUp.getDescription() != null && followUp.getDescription().contains("继续沟通"),
+                "追问任务描述应能区分后续沟通: " + followUp.getDescription());
+        assertTrue(followUp.getDescription().startsWith("继续沟通（第 2 轮）"),
+                "追问任务描述应包含继续沟通前缀与轮次: " + followUp.getDescription());
 
         replyTo(secondRound, "frank", "版本号 V2 正确");
         Map<String, Object> finalStatus = get("/api/comm/status/" + managerTaskId, "manager");
@@ -857,9 +888,11 @@ class CommunicationFlowTest {
         assertEquals(401, unauthenticated.getStatusCode().value(),
                 "未认证请求必须返回 401: " + unauthenticated.getBody());
 
+        // 写请求还要过 CSRF：先取一份匿名令牌，否则会被 CSRF 过滤器直接挡成 403，
+        // 测到的就不是“未认证”这条链路了
         ResponseEntity<Map<String, Object>> noAuthWrite =
                 rest.exchange("/api/comm/start", HttpMethod.POST,
-                        new HttpEntity<>(new HashMap<String, Object>(), authHeaders(null)),
+                        new HttpEntity<>(new HashMap<String, Object>(), anonymousCsrf(authHeaders(null))),
                         new ParameterizedTypeReference<Map<String, Object>>() {
                         });
         assertEquals(401, noAuthWrite.getStatusCode().value(), "未认证写请求必须返回 401");
@@ -882,15 +915,16 @@ class CommunicationFlowTest {
         assertEquals("ok", cleanup.getBody() == null ? null : cleanup.getBody().get("result"),
                 "清理待办失败: " + cleanup.getStatusCode() + " " + cleanup.getBody());
 
-        // 5. 错误密码不能通过。
-        //    放在最后：底层 HttpClient 会按 host 复用连接与认证缓存，
-        //    错误凭据会污染同一客户端后续请求（实测会让后面的正常请求也 401）。
+        // 5. 错误密码不能通过：校验发生在登录接口本身。
+        //    会话登录不再有客户端凭据缓存，错误密码不会污染其他用户的请求。
+        Map<String, String> wrongCredential = new HashMap<>();
+        wrongCredential.put("userId", "manager");
+        wrongCredential.put("password", "wrong-password");
         HttpHeaders wrongPwd = new HttpHeaders();
         wrongPwd.setContentType(MediaType.APPLICATION_JSON);
-        wrongPwd.set(HttpHeaders.AUTHORIZATION, "Basic " + Base64.getEncoder()
-                .encodeToString(("manager:wrong-password").getBytes(StandardCharsets.UTF_8)));
         ResponseEntity<Map<String, Object>> badCredential = rest.exchange(
-                "/api/comm/status/" + managerTaskId, HttpMethod.GET, new HttpEntity<>(wrongPwd),
+                "/api/auth/login", HttpMethod.POST,
+                new HttpEntity<>(wrongCredential, anonymousCsrf(wrongPwd)),
                 new ParameterizedTypeReference<Map<String, Object>>() {
                 });
         assertEquals(401, badCredential.getStatusCode().value(), "错误密码必须返回 401");

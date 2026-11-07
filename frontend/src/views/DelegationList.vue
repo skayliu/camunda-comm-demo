@@ -15,8 +15,8 @@
 
     <a-card :bordered="false" style="border-radius: 10px">
       <a-tabs v-model:activeKey="tab" @change="onTabChange">
-        <a-tab-pane key="out" tab="我委托出去的" />
-        <a-tab-pane key="in" tab="我受托的" />
+        <a-tab-pane key="out" tab="我的委托" />
+        <a-tab-pane key="in" tab="我的受托" />
       </a-tabs>
 
       <div class="toolbar">
@@ -28,7 +28,7 @@
           style="max-width: 280px"
         />
         <span class="muted" style="font-size: 13px">
-          共 {{ filtered.length }} 条{{ tab === 'out' ? '委托记录' : '代办记录' }}
+          共 {{ filtered.length }} 条{{ tab === 'out' ? '委托记录' : '受托记录' }}
         </span>
       </div>
 

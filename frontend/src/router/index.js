@@ -1,5 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { isLoggedIn } from '../api'
+import { ensureAuth } from '../api'
 
 const routes = [
   {
@@ -53,11 +53,14 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach((to) => {
-  if (!to.meta.public && !isLoggedIn()) {
+// 登录态由服务端会话决定，守卫必须等 /api/auth/me 的结果，
+// 不能再用“localStorage 里有没有某个键”来判断——那个键谁都能手动写上。
+router.beforeEach(async (to) => {
+  const loggedIn = await ensureAuth()
+  if (!to.meta.public && !loggedIn) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
-  if (to.name === 'login' && isLoggedIn()) {
+  if (to.name === 'login' && loggedIn) {
     return { name: 'todo' }
   }
   return true

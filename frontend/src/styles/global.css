@@ -356,7 +356,7 @@ body {
   background: #fff;
 }
 
-/* 追问记录：相对父级沟通缩进，并用左侧连线表达从属关系 */
+/* 后续沟通记录：相对父级沟通缩进，并用左侧连线表达从属关系 */
 .comm-target.is-follow {
   position: relative;
   border-left: 2px solid #ffe58f;

@@ -9,7 +9,7 @@ import org.camunda.bpm.engine.task.DelegationState;
 /**
  * 委托状态的完成兜底：处于委托中（PENDING）的任务不允许被 complete。
  *
- * <p>受托人提交代办意见走的是 {@code resolveTask}（不触发 complete 事件），
+ * <p>受托人提交受托意见走的是 {@code resolveTask}（不触发 complete 事件），
  * 因此这里拦住的正是“受托人直接点同意”的那条路径——它会把委托退化成转办，
  * 原办理人连确认的机会都没有。委托人想中止委托，应走"收回委托"，
  * 引擎会把 ASSIGNEE_ 还给 OWNER_，之后才能正常办结。</p>
