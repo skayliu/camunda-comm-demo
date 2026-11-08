@@ -161,15 +161,22 @@
       </a-table>
     </a-card>
 
+    <!-- 四个弹层按需加载：首次打开才请求对应 chunk，之后常驻以保留关闭动画 -->
     <TaskDrawer
+      v-if="drawerMounted"
       v-model:open="drawerOpen"
       :task-id="currentTaskId"
       @refresh="load"
     />
 
-    <ProcessTraceModal v-model:open="traceOpen" :process-instance-id="tracePid" />
+    <ProcessTraceModal
+      v-if="traceMounted"
+      v-model:open="traceOpen"
+      :process-instance-id="tracePid"
+    />
 
     <TransferModal
+      v-if="transferMounted"
       v-model:open="transferOpen"
       :task-id="transferTask.taskId"
       :task-name="transferTask.taskName"
@@ -177,6 +184,7 @@
     />
 
     <DelegateModal
+      v-if="delegateMounted"
       v-model:open="delegateOpen"
       :task-id="delegateTask.taskId"
       :task-name="delegateTask.taskName"
@@ -186,8 +194,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import { message } from 'ant-design-vue'
+import { computed, defineAsyncComponent, onMounted, reactive, ref } from 'vue'
+import message from 'ant-design-vue/es/message'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
@@ -200,10 +208,12 @@ import {
   ReloadOutlined
 } from '@ant-design/icons-vue'
 import { commApi, errorText, wbApi } from '../api'
-import TaskDrawer from '../components/TaskDrawer.vue'
-import ProcessTraceModal from '../components/ProcessTraceModal.vue'
-import TransferModal from '../components/TransferModal.vue'
-import DelegateModal from '../components/DelegateModal.vue'
+// 弹层体积不小（跟踪弹窗、任务抽屉各有几十 KB），静态引入会让待办首屏为
+// 「可能一次都不点开」的功能买单，改为 defineAsyncComponent 按首次打开加载
+const TaskDrawer = defineAsyncComponent(() => import('../components/TaskDrawer.vue'))
+const ProcessTraceModal = defineAsyncComponent(() => import('../components/ProcessTraceModal.vue'))
+const TransferModal = defineAsyncComponent(() => import('../components/TransferModal.vue'))
+const DelegateModal = defineAsyncComponent(() => import('../components/DelegateModal.vue'))
 
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
@@ -222,19 +232,25 @@ const stats = reactive({ total: 0, approval: 0, comm: 0, followup: 0, today: 0 }
 
 const drawerOpen = ref(false)
 const currentTaskId = ref('')
+// 首次打开后保持挂载：既只下载一次 chunk，也让 a-modal / a-drawer 的关闭动画完整播完
+const drawerMounted = ref(false)
 
 const traceOpen = ref(false)
 const tracePid = ref('')
+const traceMounted = ref(false)
 
 const transferOpen = ref(false)
 const transferTask = reactive({ taskId: '', taskName: '' })
+const transferMounted = ref(false)
 
 const delegateOpen = ref(false)
 const delegateTask = reactive({ taskId: '', taskName: '' })
+const delegateMounted = ref(false)
 
 function openDelegate(record) {
   delegateTask.taskId = record.taskId
   delegateTask.taskName = record.taskName
+  delegateMounted.value = true
   delegateOpen.value = true
 }
 
@@ -309,17 +325,20 @@ function onTableChange(pag) {
 
 function openTask(record) {
   currentTaskId.value = record.taskId
+  drawerMounted.value = true
   drawerOpen.value = true
 }
 
 function openTrace(record) {
   tracePid.value = record.processInstanceId
+  traceMounted.value = true
   traceOpen.value = true
 }
 
 function openTransfer(record) {
   transferTask.taskId = record.taskId
   transferTask.taskName = record.taskName
+  transferMounted.value = true
   transferOpen.value = true
 }
 

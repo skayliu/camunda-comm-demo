@@ -17,7 +17,7 @@
 - Spring Boot **3.5.16** / **Java 17**
 - H2 内存数据库（零依赖）；引擎表结构与业务扩展表统一由 **Flyway** 管理
 - Camunda 自带 MyBatis（自定义实体 + SessionFactory 机制）
-- 前端：**Vue 3.5 + ant-design-vue 4 + Vite 5**，构建产物输出到 `src/main/resources/static/app`，访问路径 `/app/`
+- 前端：**Vue 3.5 + ant-design-vue 4 + Vite 8**，构建产物输出到 `src/main/resources/static/app`，访问路径 `/app/`
 
 > 版本以 `pom.xml` 为准。Camunda 7.24 已移除 `customMybatisXMLMappers`，
 > 自定义 Mapper 需在 `postInit` 阶段显式装载，插件里已按此实现。
@@ -77,7 +77,7 @@ mvn spring-boot:run
 ### 三个容易踩的点
 
 1. **别把 5173 当生产入口**：`5173` 是 Vite dev server，仅在 `npm run dev` 时存在，访问需带前缀 `http://localhost:5173/app/`，它只把 `/api` 代理到 8080。
-2. **改了前端要重新构建**：8080 提供的是 `static/app` 里的构建产物，源码改动不会自动生效，需执行 `npm run build`（`outDir` 已指向该目录）。
+2. **改了前端要重新构建**：8080 提供的是 `static/app` 里的构建产物，源码改动不会自动生效，需执行 `npm run build`（`outDir` 已指向该目录）。该命令末尾会自动校验产物（引用完整性、循环依赖、弹层按需），任一失败即退出非 0，不要忽略；只想出包不校验时用 `npm run build:pure`。各命令、校验项与失败含义详见 [`docs/前端构建与校验说明.md`](docs/前端构建与校验说明.md)。
 3. **不要直接改 `target/classes/static/app`**：那是构建输出的同步副本，下次构建会被覆盖；改源码后重新构建即可。
 
 ## 测试

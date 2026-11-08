@@ -12,6 +12,7 @@ import org.camunda.bpm.engine.history.HistoricTaskInstance;
 import org.camunda.bpm.engine.history.HistoricVariableInstance;
 import org.camunda.bpm.engine.identity.Group;
 import org.camunda.bpm.engine.repository.ProcessDefinition;
+import org.camunda.bpm.engine.runtime.VariableInstance;
 import org.camunda.bpm.engine.task.Comment;
 import org.camunda.bpm.engine.task.IdentityLink;
 import org.camunda.bpm.engine.task.IdentityLinkType;
@@ -1454,25 +1455,57 @@ public class ProcessTraceService {
 
     /** 流程标题：优先运行期变量，流程已结束后退化为历史变量 */
     private String processTitle(HistoricProcessInstance hpi) {
-        try {
-            Map<String, Object> vars = runtimeService.getVariables(hpi.getId());
-            if (vars != null && vars.get("title") != null) {
-                return String.valueOf(vars.get("title"));
-            }
-        } catch (RuntimeException ignore) {
-            // 实例已结束，运行期变量取不到
+        if (hpi == null) {
+            return "审批流程";
+        }
+        String liveTitle = runningTitle(hpi.getId());
+        if (liveTitle != null) {
+            return liveTitle;
         }
         try {
-            HistoricVariableInstance title = historyService.createHistoricVariableInstanceQuery()
-                    .processInstanceId(hpi.getId()).variableName("title").singleResult();
-            if (title != null && title.getValue() != null) {
-                return String.valueOf(title.getValue());
+            List<HistoricVariableInstance> titles = historyService.createHistoricVariableInstanceQuery()
+                    .processInstanceId(hpi.getId()).variableName("title").list();
+            for (HistoricVariableInstance title : titles) {
+                if (title.getValue() != null) {
+                    return String.valueOf(title.getValue());
+                }
             }
         } catch (RuntimeException ignore) {
             // 历史变量不可用
         }
         ProcessDefinition pd = definition(hpi.getProcessDefinitionId());
         return pd == null ? "审批流程" : pd.getName();
+    }
+
+    /**
+     * 运行期 title 变量；实例不在运行期时返回 null，由调用方退到历史变量。
+     *
+     * <p>不能用 {@code runtimeService.getVariables(executionId)}：实例结束后（已归档的子流程、
+     * 被删除的实例）引擎会抛 {@code NullValueException: execution ... doesn't exist}。
+     * 这个异常发生在 command context 内部，引擎收尾时会打印 ENGINE-16004 并把当前
+     * Spring 事务标记为 rollback-only，因此即使外面 catch 住，请求仍会在提交阶段以 500 结束
+     * ——表现就是「下钻一个已结束的子流程，接口直接报错」。</p>
+     *
+     * <p>变量查询在实例不存在时只返回 null，不抛异常、不污染事务、不产生 ERROR 日志。</p>
+     */
+    private String runningTitle(String processInstanceId) {
+        try {
+            // VariableInstanceQuery 只有 processInstanceIdIn（无单值重载）；
+            // 同名变量可能存在于多个执行作用域，故用 list 而不是 singleResult，避免多结果异常
+            List<VariableInstance> titles = runtimeService.createVariableInstanceQuery()
+                    .processInstanceIdIn(processInstanceId)
+                    .variableName("title")
+                    .list();
+            for (VariableInstance title : titles) {
+                if (title.getValue() != null) {
+                    return String.valueOf(title.getValue());
+                }
+            }
+        } catch (RuntimeException ex) {
+            // 引擎查询失败时退回历史变量，不让跟踪图因为标题而打不开
+            LOG.debug("读取运行期 title 失败，processInstanceId=" + processInstanceId, ex);
+        }
+        return null;
     }
 
     // ===== BPMN DI 解析 =====

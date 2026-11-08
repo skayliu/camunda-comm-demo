@@ -87,6 +87,14 @@ http.interceptors.response.use(
       }
     }
 
+    // 登录态探测（/auth/me）的 401 是“尚未登录”的预期结果，不是故障：
+    // 打上 __silent 供统一错误提示跳过，调用方按返回值处理即可。
+    // 注意这只能挡住提示与跳转，挡不住浏览器 Console 里的那条网络日志——
+    // 那条只有“根本不发这个请求”才能消除，所以登录页守卫不再探测登录态。
+    if (status === 401 && config && String(config.url || '').includes('/auth/me')) {
+      error.__silent = true
+    }
+
     if (status === 401 && !window.location.hash.startsWith('#/login')) {
       currentUser = ''
       authChecked = null

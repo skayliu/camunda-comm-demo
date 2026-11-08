@@ -96,7 +96,7 @@
     </a-card>
 
     <!-- 详情 -->
-    <DetailDrawer v-model:open="detailOpen" title="代理规则详情" :width="560">
+    <DetailDrawer v-if="detailMounted" v-model:open="detailOpen" title="代理规则详情" :width="560">
       <template v-if="current">
         <a-descriptions :column="1" bordered size="small">
           <a-descriptions-item label="规则 ID"><span class="mono">{{ current.id }}</span></a-descriptions-item>
@@ -251,12 +251,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import { message } from 'ant-design-vue'
+import { computed, defineAsyncComponent, onMounted, reactive, ref } from 'vue'
+import message from 'ant-design-vue/es/message'
 import dayjs from 'dayjs'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons-vue'
 import { agentApi, authApi, commApi, errorText, getUser } from '../api'
-import DetailDrawer from '../components/DetailDrawer.vue'
+// 详情抽屉只在点开时下载
+const DetailDrawer = defineAsyncComponent(() => import('../components/DetailDrawer.vue'))
 
 const emit = defineEmits(['refresh-count'])
 
@@ -267,6 +268,7 @@ const loading = ref(false)
 const saving = ref(false)
 const rows = ref([])
 const detailOpen = ref(false)
+const detailMounted = ref(false)
 const current = ref(null)
 const formOpen = ref(false)
 const loadingUsers = ref(false)
@@ -355,6 +357,7 @@ function openCreate() {
 
 function openDetail(record) {
   current.value = record
+  detailMounted.value = true
   detailOpen.value = true
 }
 

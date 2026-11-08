@@ -13,6 +13,7 @@ import org.camunda.bpm.engine.history.HistoricTaskInstance;
 import org.camunda.bpm.engine.identity.User;
 import org.camunda.bpm.engine.repository.ProcessDefinition;
 import org.camunda.bpm.engine.runtime.ProcessInstance;
+import org.camunda.bpm.engine.runtime.VariableInstance;
 import org.camunda.bpm.engine.task.Comment;
 import org.camunda.bpm.engine.task.DelegationState;
 import org.camunda.bpm.engine.task.Task;
@@ -515,12 +516,20 @@ public class WorkbenchService {
             return Collections.emptyMap();
         }
         try {
-            Map<String, Object> vars = runtimeService.getVariables(processInstanceId);
-            if (vars != null && !vars.isEmpty()) {
+            // 与 ProcessTraceService#runningTitle 同一原因：getVariables(executionId) 在实例结束后
+            // 抛 NullValueException，引擎会打 ENGINE-16004 并把事务标记 rollback-only，
+            // catch 住也会在外层提交时变成 500。变量查询在实例不存在时只返回空列表。
+            List<VariableInstance> live = runtimeService.createVariableInstanceQuery()
+                    .processInstanceIdIn(processInstanceId).list();
+            if (!live.isEmpty()) {
+                Map<String, Object> vars = new LinkedHashMap<>();
+                for (VariableInstance v : live) {
+                    vars.put(v.getName(), v.getValue());
+                }
                 return vars;
             }
         } catch (RuntimeException e) {
-            // 流程已结束：运行期变量取不到，继续尝试历史变量
+            // 查询失败：继续尝试历史变量，不让列表因为变量读不到而整体报错
         }
         try {
             Map<String, Object> vars = new LinkedHashMap<>();

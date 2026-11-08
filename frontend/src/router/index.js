@@ -1,5 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { ensureAuth } from '../api'
+import { ensureAuth, isLoggedIn } from '../api'
 
 const routes = [
   {
@@ -55,13 +55,23 @@ const router = createRouter({
 
 // 登录态由服务端会话决定，守卫必须等 /api/auth/me 的结果，
 // 不能再用“localStorage 里有没有某个键”来判断——那个键谁都能手动写上。
+//
+// 但公开路由（登录页）不能再去探测：未登录时 /api/auth/me 必然 401，
+// 浏览器会把这条 401 作为网络错误记进 Console，看起来像系统故障，
+// 实际上只是“还没登录”这一正常状态。公开页只需要知道“本次会话内是否已确认登录”：
+// 已确认（isLoggedIn）就送回待办，否则直接放行，不再多发一次必败的请求。
+// 副作用：已登录状态下手动打开 /app/login 会看到登录表单（刷新后内存态清空，
+// 无法在零请求的前提下得知会话仍有效）。正常入口 /app 不受影响，仍会探测并直达待办。
 router.beforeEach(async (to) => {
-  const loggedIn = await ensureAuth()
-  if (!to.meta.public && !loggedIn) {
-    return { name: 'login', query: { redirect: to.fullPath } }
+  if (to.meta.public) {
+    if (to.name === 'login' && isLoggedIn()) {
+      return { name: 'todo' }
+    }
+    return true
   }
-  if (to.name === 'login' && loggedIn) {
-    return { name: 'todo' }
+  const loggedIn = await ensureAuth()
+  if (!loggedIn) {
+    return { name: 'login', query: { redirect: to.fullPath } }
   }
   return true
 })

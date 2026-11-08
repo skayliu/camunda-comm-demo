@@ -460,7 +460,7 @@
 
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
-import { message } from 'ant-design-vue'
+import message from 'ant-design-vue/es/message'
 import dayjs from 'dayjs'
 import { commApi, errorText, wbApi } from '../api'
 import TransferModal from './TransferModal.vue'
@@ -1009,7 +1009,10 @@ watch(
   () => props.open,
   (val) => {
     if (val) load()
-  }
+  },
+  // 组件可能由 v-if 在「已打开」状态下才挂载（按需加载），
+  // 此时 open 没有从 false 变 true 的过程，必须立即执行一次
+  { immediate: true }
 )
 
 watch(

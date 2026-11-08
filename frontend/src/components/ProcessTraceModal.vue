@@ -1089,7 +1089,7 @@ import {
   ZoomInOutlined,
   ZoomOutOutlined
 } from '@ant-design/icons-vue'
-import { message } from 'ant-design-vue'
+import message from 'ant-design-vue/es/message'
 import { errorText, wbApi } from '../api'
 
 const props = defineProps({

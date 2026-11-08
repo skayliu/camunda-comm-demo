@@ -97,7 +97,7 @@
       </a-table>
     </a-card>
 
-    <DetailDrawer v-model:open="detailOpen" title="发起详情" :width="560">
+    <DetailDrawer v-if="detailMounted" v-model:open="detailOpen" title="发起详情" :width="560">
       <template v-if="current">
         <a-descriptions :column="1" bordered size="small">
           <a-descriptions-item label="流程">{{ current.processTitle }}</a-descriptions-item>
@@ -167,20 +167,21 @@
       </template>
     </DetailDrawer>
 
-    <ProcessTraceModal v-model:open="traceOpen" :process-instance-id="tracePid" />
+    <ProcessTraceModal v-if="traceMounted" v-model:open="traceOpen" :process-instance-id="tracePid" />
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { message } from 'ant-design-vue'
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
+import message from 'ant-design-vue/es/message'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons-vue'
 import { commApi, errorText, wbApi } from '../api'
-import ProcessTraceModal from '../components/ProcessTraceModal.vue'
-import DetailDrawer from '../components/DetailDrawer.vue'
+// 详情抽屉与跟踪弹窗按需加载：只在点开时下载
+const ProcessTraceModal = defineAsyncComponent(() => import('../components/ProcessTraceModal.vue'))
+const DetailDrawer = defineAsyncComponent(() => import('../components/DetailDrawer.vue'))
 import DetailSection from '../components/DetailSection.vue'
 import TransferChain from '../components/TransferChain.vue'
 import DelegationChain from '../components/DelegationChain.vue'
@@ -196,11 +197,13 @@ const page = ref(1)
 const size = ref(10)
 const total = ref(0)
 const detailOpen = ref(false)
+const detailMounted = ref(false)
 const current = ref(null)
 const transfers = ref([])
 const delegations = ref([])
 const traceOpen = ref(false)
 const tracePid = ref('')
+const traceMounted = ref(false)
 
 const columns = [
   { title: '流程', key: 'title', width: 240 },
@@ -265,6 +268,7 @@ function openDetail(record) {
   current.value = record
   transfers.value = []
   delegations.value = []
+  detailMounted.value = true
   detailOpen.value = true
   loadTransfers(record.processInstanceId)
   loadDelegations(record.processInstanceId)
@@ -290,6 +294,7 @@ async function loadTransfers(processInstanceId) {
 
 function openTrace(record) {
   tracePid.value = record.processInstanceId
+  traceMounted.value = true
   traceOpen.value = true
 }
 

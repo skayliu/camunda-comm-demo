@@ -1,5 +1,8 @@
 package com.example.camundademo;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.example.camundademo.service.ProcessTraceService;
 import org.camunda.bpm.engine.HistoryService;
 import org.camunda.bpm.engine.RepositoryService;
@@ -8,6 +11,7 @@ import org.camunda.bpm.engine.TaskService;
 import org.camunda.bpm.engine.runtime.ProcessInstance;
 import org.camunda.bpm.engine.task.Task;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.TestPropertySource;
@@ -18,6 +22,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -201,6 +206,73 @@ class ProcessTraceCallActivityDrillTest {
                 "父流程办理人必须能下钻查看子流程，否则点击 + 会 403");
         assertFalse(processTraceService.canView(child.getId(), "outsider"),
                 "与调用链无关的用户不可查看");
+    }
+
+    /**
+     * 已结束的子流程也必须能下钻。
+     *
+     * <p>回归的是一次真实故障：processTitle 曾用 {@code runtimeService.getVariables(executionId)}
+     * 读 title，实例结束后引擎抛 {@code NullValueException}，收尾时打印 ENGINE-16004
+     * 并把事务标记 rollback-only，下钻接口最终 500。</p>
+     *
+     * <p>断言的是「引擎不再打 ERROR」，而不只是返回值：旧实现会把异常吞掉并照样返回正确标题，
+     * 只看返回值的断言抓不住这个问题。</p>
+     */
+    @Test
+    void finishedChildInstanceShouldTraceWithoutEngineError() {
+        // 子流程用 userTask 收尾，便于在测试里把它跑到结束；其余结构与 CHILD_BPMN 一致
+        String finishedChildBpmn = CHILD_BPMN
+                .replace("<bpmn:receiveTask id=\"childWait\" name=\"等待外部消息\">",
+                        "<bpmn:userTask id=\"childWait\" name=\"等待外部消息\" camunda:assignee=\"childUser\">")
+                .replace("</bpmn:receiveTask>", "</bpmn:userTask>");
+        repositoryService.createDeployment()
+                .addString("trace-drill-child-done.bpmn", finishedChildBpmn)
+                .name("trace-drill-child-done").deploy();
+        repositoryService.createDeployment()
+                .addString("trace-drill-parent-done.bpmn", PARENT_BPMN)
+                .name("trace-drill-parent-done").deploy();
+
+        ProcessInstance parent = runtimeService.startProcessInstanceByKey("traceDrillParent");
+        Task apply = taskService.createTaskQuery().processInstanceId(parent.getId()).singleResult();
+        assertNotNull(apply, "父流程应停在发起申请节点");
+        taskService.complete(apply.getId());
+
+        ProcessInstance child = runtimeService.createProcessInstanceQuery()
+                .superProcessInstanceId(parent.getId()).singleResult();
+        assertNotNull(child, "调用活动应已调起子流程实例");
+        String childId = child.getId();
+
+        Task childTask = taskService.createTaskQuery().processInstanceId(childId).singleResult();
+        assertNotNull(childTask, "子流程应停在 userTask");
+        taskService.complete(childTask.getId());
+        assertNull(runtimeService.createProcessInstanceQuery().processInstanceId(childId).singleResult(),
+                "完成后子流程已结束，运行期不应再有该 execution");
+        assertNotNull(historyService.createHistoricProcessInstanceQuery()
+                .processInstanceId(childId).singleResult(), "历史表应保留该实例，下钻才有依据");
+
+        ch.qos.logback.classic.Logger engineLogger =
+                (ch.qos.logback.classic.Logger) LoggerFactory.getLogger("org.camunda.bpm.engine.context");
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        engineLogger.addAppender(appender);
+        Map<String, Object> trace;
+        try {
+            trace = processTraceService.trace(childId);
+        } finally {
+            engineLogger.detachAppender(appender);
+        }
+
+        assertEquals("FINISHED", trace.get("state"));
+        // 子流程没有 title 变量，应回落到流程定义名，而不是报错或留空
+        assertEquals("被调用子流程", trace.get("processTitle"));
+        assertEquals("COMPLETED", node(trace, "childWait").get("status"), "已结束实例的节点应正常解析为已完成");
+
+        List<ILoggingEvent> engineErrors = appender.list.stream()
+                .filter(event -> event.getLevel().isGreaterOrEqual(Level.ERROR))
+                .toList();
+        assertTrue(engineErrors.isEmpty(),
+                "已结束实例不应触发引擎 ERROR（ENGINE-16004），实际："
+                        + engineErrors.stream().map(ILoggingEvent::getFormattedMessage).toList());
     }
 
     @SuppressWarnings("unchecked")

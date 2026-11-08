@@ -3,9 +3,9 @@
     <div class="login-brand">
       <div>
         <div class="wb-logo" style="padding: 0; height: auto">
-          <div class="wb-logo-mark">协</div>
+          <div class="wb-logo-mark">审</div>
           <div>
-            <div class="wb-logo-text">沟通待办中心</div>
+            <div class="wb-logo-text">流程审批中心</div>
             <div class="wb-logo-sub">Process Collaboration</div>
           </div>
         </div>
@@ -36,7 +36,7 @@
     <div class="login-panel">
       <div class="login-card">
         <h2>登录</h2>
-        <p class="login-sub">使用流程账号登录，进入你的待办中心</p>
+        <p class="login-sub">使用流程账号登录，进入你的流程审批中心</p>
 
         <a-form layout="vertical" @submit.prevent="submit">
           <a-form-item label="账号" :validate-status="error ? 'error' : ''">

@@ -11,7 +11,7 @@
       <div class="wb-logo">
         <div class="wb-logo-mark">协</div>
         <div v-if="!collapsed">
-          <div class="wb-logo-text">沟通待办中心</div>
+          <div class="wb-logo-text">流程审批中心</div>
           <div class="wb-logo-sub">Process Collaboration</div>
         </div>
       </div>

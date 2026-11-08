@@ -44,7 +44,7 @@
 
 <script setup>
 import { ref, watch } from 'vue'
-import { message } from 'ant-design-vue'
+import message from 'ant-design-vue/es/message'
 import { commApi, errorText, wbApi } from '../api'
 
 const props = defineProps({
@@ -120,6 +120,8 @@ watch(
       reason.value = ''
       loadUsers()
     }
-  }
+  },
+  // 组件可能由 v-if 在「已打开」状态下才挂载（按需加载），需要 immediate
+  { immediate: true }
 )
 </script>

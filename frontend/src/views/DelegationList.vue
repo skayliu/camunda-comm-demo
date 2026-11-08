@@ -107,17 +107,18 @@
       </a-table>
     </a-card>
 
-    <ProcessTraceModal v-model:open="traceOpen" :process-instance-id="tracePid" />
+    <ProcessTraceModal v-if="traceMounted" v-model:open="traceOpen" :process-instance-id="tracePid" />
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { message } from 'ant-design-vue'
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
+import message from 'ant-design-vue/es/message'
 import dayjs from 'dayjs'
 import { ReloadOutlined } from '@ant-design/icons-vue'
 import { errorText, wbApi } from '../api'
-import ProcessTraceModal from '../components/ProcessTraceModal.vue'
+// 跟踪弹窗按需加载：只在点开时下载
+const ProcessTraceModal = defineAsyncComponent(() => import('../components/ProcessTraceModal.vue'))
 
 const emit = defineEmits(['refresh-count'])
 
@@ -129,6 +130,7 @@ const loading = ref(false)
 const canceling = ref('')
 const traceOpen = ref(false)
 const tracePid = ref('')
+const traceMounted = ref(false)
 
 const stateOptions = [
   { label: '全部', value: 'all' },
@@ -227,6 +229,7 @@ async function cancel(record) {
 
 function openTrace(record) {
   tracePid.value = record.processInstanceId
+  traceMounted.value = true
   traceOpen.value = true
 }
 

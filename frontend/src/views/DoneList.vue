@@ -85,7 +85,7 @@
       </a-table>
     </a-card>
 
-    <DetailDrawer v-model:open="detailOpen" title="已办详情" :width="560">
+    <DetailDrawer v-if="detailMounted" v-model:open="detailOpen" title="已办详情" :width="560">
       <template v-if="current">
         <a-descriptions :column="1" bordered size="small">
           <a-descriptions-item label="流程">
@@ -145,18 +145,19 @@
       </template>
     </DetailDrawer>
 
-    <ProcessTraceModal v-model:open="traceOpen" :process-instance-id="tracePid" />
+    <ProcessTraceModal v-if="traceMounted" v-model:open="traceOpen" :process-instance-id="tracePid" />
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { message } from 'ant-design-vue'
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
+import message from 'ant-design-vue/es/message'
 import dayjs from 'dayjs'
 import { ReloadOutlined } from '@ant-design/icons-vue'
 import { errorText, wbApi } from '../api'
-import ProcessTraceModal from '../components/ProcessTraceModal.vue'
-import DetailDrawer from '../components/DetailDrawer.vue'
+// 详情抽屉与跟踪弹窗只在点开时才需要，改为按需加载，不占首屏
+const ProcessTraceModal = defineAsyncComponent(() => import('../components/ProcessTraceModal.vue'))
+const DetailDrawer = defineAsyncComponent(() => import('../components/DetailDrawer.vue'))
 import DetailSection from '../components/DetailSection.vue'
 import TransferChain from '../components/TransferChain.vue'
 
@@ -167,10 +168,12 @@ const page = ref(1)
 const size = ref(10)
 const total = ref(0)
 const detailOpen = ref(false)
+const detailMounted = ref(false)
 const current = ref(null)
 const transfers = ref([])
 const traceOpen = ref(false)
 const tracePid = ref('')
+const traceMounted = ref(false)
 
 const columns = [
   { title: '流程', key: 'title', width: 240 },
@@ -241,6 +244,7 @@ function onTableChange(pag) {
 function openDetail(record) {
   current.value = record
   transfers.value = []
+  detailMounted.value = true
   detailOpen.value = true
   loadTransfers(record.taskId)
 }
@@ -256,6 +260,7 @@ async function loadTransfers(taskId) {
 
 function openTrace(record) {
   tracePid.value = record.processInstanceId
+  traceMounted.value = true
   traceOpen.value = true
 }
 
