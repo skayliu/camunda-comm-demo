@@ -1,14 +1,18 @@
 package com.example.camundademo.config;
 
 import com.example.camundademo.entity.BizAgentRule;
+import com.example.camundademo.entity.BizCcRecord;
 import com.example.camundademo.entity.BizCommSession;
 import com.example.camundademo.entity.BizCommTask;
+import com.example.camundademo.entity.BizHandleRecord;
 import com.example.camundademo.entity.BizTaskDelegate;
 import com.example.camundademo.entity.BizTaskExt;
 import com.example.camundademo.entity.BizTaskTransfer;
 import com.example.camundademo.interceptor.CommunicationCommandInterceptor;
 import com.example.camundademo.persistence.BizAgentRuleManager;
+import com.example.camundademo.persistence.BizCcRecordManager;
 import com.example.camundademo.persistence.BizCommSessionManager;
+import com.example.camundademo.persistence.BizHandleRecordManager;
 import com.example.camundademo.persistence.BizCommTaskManager;
 import com.example.camundademo.persistence.BizTaskDelegateManager;
 import com.example.camundademo.persistence.BizTaskExtManager;
@@ -43,7 +47,9 @@ public class CommProcessEnginePlugin extends AbstractProcessEnginePlugin {
             "mapper/BizCommTask.xml",
             "mapper/BizTaskTransfer.xml",
             "mapper/BizTaskDelegate.xml",
-            "mapper/BizAgentRule.xml"
+            "mapper/BizAgentRule.xml",
+            "mapper/BizCcRecord.xml",
+            "mapper/BizHandleRecord.xml"
     };
 
     @Override
@@ -57,6 +63,8 @@ public class CommProcessEnginePlugin extends AbstractProcessEnginePlugin {
         preParseListeners.add(new GlobalUserTaskParseListener());
         // 流程级监听：主流程结束时级联终止部门沟通子流程，避免孤儿实例
         preParseListeners.add(new GlobalProcessParseListener());
+        // 传阅：解析 BPMN 扩展属性（ccUsers / ccType），节点结束/流程结束时自动传阅
+        preParseListeners.add(new GlobalCcParseListener());
 
         // 2. 注册自定义SessionFactory
         List<SessionFactory> sessionFactories = config.getCustomSessionFactories();
@@ -70,6 +78,8 @@ public class CommProcessEnginePlugin extends AbstractProcessEnginePlugin {
         sessionFactories.add(new BizTaskTransferManager.Factory());
         sessionFactories.add(new BizTaskDelegateManager.Factory());
         sessionFactories.add(new BizAgentRuleManager.Factory());
+        sessionFactories.add(new BizCcRecordManager.Factory());
+        sessionFactories.add(new BizHandleRecordManager.Factory());
 
         // 3. 注册自定义命令拦截器（审批时校验沟通状态）
         // 必须放入 post 链：它位于 CommandContextInterceptor 之后，
@@ -129,6 +139,16 @@ public class CommProcessEnginePlugin extends AbstractProcessEnginePlugin {
         updateMappings.put(BizAgentRule.class, "updateBizAgentRule");
         deleteMappings.put(BizAgentRule.class, "deleteBizAgentRule");
         selectMappings.put(BizAgentRule.class, "selectBizAgentRule");
+
+        insertMappings.put(BizCcRecord.class, "insertBizCcRecord");
+        updateMappings.put(BizCcRecord.class, "updateBizCcRecord");
+        deleteMappings.put(BizCcRecord.class, "deleteBizCcRecord");
+        selectMappings.put(BizCcRecord.class, "selectBizCcRecord");
+
+        insertMappings.put(BizHandleRecord.class, "insertBizHandleRecord");
+        updateMappings.put(BizHandleRecord.class, "updateBizHandleRecord");
+        deleteMappings.put(BizHandleRecord.class, "deleteBizHandleRecord");
+        selectMappings.put(BizHandleRecord.class, "selectBizHandleRecord");
 
         dbSqlSessionFactory.setInsertStatements(insertMappings);
         dbSqlSessionFactory.setUpdateStatements(updateMappings);

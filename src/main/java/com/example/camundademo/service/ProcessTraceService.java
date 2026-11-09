@@ -162,6 +162,12 @@ public class ProcessTraceService {
     @Autowired
     private TaskTransferService taskTransferService;
 
+    @Autowired
+    private CcService ccService;
+
+    @Autowired
+    private HandleService handleService;
+
     /** 子流程调用链的最大回溯深度，防止异常数据形成环导致无限递归 */
     private static final int MAX_CALL_DEPTH = 8;
 
@@ -215,6 +221,12 @@ public class ProcessTraceService {
                 .processInstanceId(processInstanceId)
                 .taskCandidateUser(userId)
                 .count() > 0) {
+            return true;
+        }
+        // 待阅人/阅办承办人不是审批人，但“副本送达”和“承办工作”都必须能打开流程看上下文。
+        // 这两类记录只存在业务表，引擎历史里查不到，必须单独补权限。
+        if (ccService.hasCcRecord(processInstanceId, userId)
+                || handleService.hasHandleRecord(processInstanceId, userId)) {
             return true;
         }
         if (depth >= MAX_CALL_DEPTH) {

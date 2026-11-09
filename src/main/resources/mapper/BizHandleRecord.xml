@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.camundademo.persistence.BizHandleRecordManager">
+
+    <resultMap id="bizHandleRecordResultMap" type="com.example.camundademo.entity.BizHandleRecord">
+        <id property="id" column="ID_" jdbcType="VARCHAR"/>
+        <result property="processInstanceId" column="PROC_INST_ID_" jdbcType="VARCHAR"/>
+        <result property="taskId" column="TASK_ID_" jdbcType="VARCHAR"/>
+        <result property="processDefinitionKey" column="PROC_DEF_KEY_" jdbcType="VARCHAR"/>
+        <result property="taskDefinitionKey" column="TASK_DEF_KEY_" jdbcType="VARCHAR"/>
+        <result property="title" column="TITLE_" jdbcType="VARCHAR"/>
+        <result property="assigneeId" column="ASSIGNEE_ID_" jdbcType="VARCHAR"/>
+        <result property="senderId" column="SENDER_ID_" jdbcType="VARCHAR"/>
+        <result property="instruction" column="INSTRUCTION_" jdbcType="CLOB"/>
+        <result property="deadline" column="DEADLINE_" jdbcType="TIMESTAMP"/>
+        <result property="handleStatus" column="HANDLE_STATUS_" jdbcType="VARCHAR"/>
+        <result property="handleResult" column="HANDLE_RESULT_" jdbcType="CLOB"/>
+        <result property="handleTime" column="HANDLE_TIME_" jdbcType="TIMESTAMP"/>
+        <result property="revoked" column="IS_REVOKED_" jdbcType="INTEGER"/>
+        <result property="revokeTime" column="REVOKE_TIME_" jdbcType="TIMESTAMP"/>
+        <result property="revokeReason" column="REVOKE_REASON_" jdbcType="VARCHAR"/>
+        <result property="createTime" column="CREATE_TIME_" jdbcType="TIMESTAMP"/>
+        <result property="updateTime" column="UPDATE_TIME_" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <insert id="insertBizHandleRecord" parameterType="com.example.camundademo.entity.BizHandleRecord">
+        INSERT INTO BIZ_HANDLE_RECORD_ (ID_, PROC_INST_ID_, TASK_ID_, PROC_DEF_KEY_, TASK_DEF_KEY_, TITLE_,
+            ASSIGNEE_ID_, SENDER_ID_, INSTRUCTION_, DEADLINE_, HANDLE_STATUS_, HANDLE_RESULT_, HANDLE_TIME_,
+            IS_REVOKED_, REVOKE_TIME_, REVOKE_REASON_, CREATE_TIME_, UPDATE_TIME_)
+        VALUES (#{id, jdbcType=VARCHAR}, #{processInstanceId, jdbcType=VARCHAR}, #{taskId, jdbcType=VARCHAR},
+                #{processDefinitionKey, jdbcType=VARCHAR}, #{taskDefinitionKey, jdbcType=VARCHAR},
+                #{title, jdbcType=VARCHAR}, #{assigneeId, jdbcType=VARCHAR}, #{senderId, jdbcType=VARCHAR},
+                #{instruction, jdbcType=CLOB}, #{deadline, jdbcType=TIMESTAMP},
+                #{handleStatus, jdbcType=VARCHAR}, #{handleResult, jdbcType=CLOB},
+                #{handleTime, jdbcType=TIMESTAMP}, #{revoked, jdbcType=INTEGER},
+                #{revokeTime, jdbcType=TIMESTAMP}, #{revokeReason, jdbcType=VARCHAR},
+                #{createTime, jdbcType=TIMESTAMP}, #{updateTime, jdbcType=TIMESTAMP})
+    </insert>
+
+    <update id="updateBizHandleRecord" parameterType="com.example.camundademo.entity.BizHandleRecord">
+        UPDATE BIZ_HANDLE_RECORD_
+        SET HANDLE_STATUS_ = #{handleStatus, jdbcType=VARCHAR},
+            HANDLE_RESULT_ = #{handleResult, jdbcType=CLOB},
+            HANDLE_TIME_ = #{handleTime, jdbcType=TIMESTAMP},
+            IS_REVOKED_ = #{revoked, jdbcType=INTEGER},
+            REVOKE_TIME_ = #{revokeTime, jdbcType=TIMESTAMP},
+            REVOKE_REASON_ = #{revokeReason, jdbcType=VARCHAR},
+            UPDATE_TIME_ = #{updateTime, jdbcType=TIMESTAMP}
+        WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </update>
+
+    <delete id="deleteBizHandleRecord" parameterType="string">
+        DELETE FROM BIZ_HANDLE_RECORD_ WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </delete>
+
+    <select id="selectBizHandleRecord" parameterType="string" resultMap="bizHandleRecordResultMap">
+        SELECT * FROM BIZ_HANDLE_RECORD_ WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </select>
+
+    <!-- 去重：同一待办、同一承办人同时只允许一条未完成的阅办 -->
+    <select id="countActive" parameterType="map" resultType="long">
+        SELECT COUNT(*) FROM BIZ_HANDLE_RECORD_
+        WHERE PROC_INST_ID_ = #{processInstanceId, jdbcType=VARCHAR}
+          AND TASK_ID_ = #{taskId, jdbcType=VARCHAR}
+          AND ASSIGNEE_ID_ = #{assigneeId, jdbcType=VARCHAR}
+          AND HANDLE_STATUS_ &lt;&gt; 'DONE'
+          AND IS_REVOKED_ = 0
+    </select>
+
+    <select id="selectByAssignee" parameterType="string" resultMap="bizHandleRecordResultMap">
+        SELECT * FROM BIZ_HANDLE_RECORD_
+        WHERE ASSIGNEE_ID_ = #{assigneeId, jdbcType=VARCHAR}
+        ORDER BY
+            CASE WHEN IS_REVOKED_ = 0 AND HANDLE_STATUS_ &lt;&gt; 'DONE' THEN 0 ELSE 1 END,
+            CREATE_TIME_ DESC, ID_ DESC
+    </select>
+
+    <!-- 我发出的阅办：按发起人反查，仍可撤回的排前面，其次按发起时间倒序 -->
+    <select id="selectBySender" parameterType="string" resultMap="bizHandleRecordResultMap">
+        SELECT * FROM BIZ_HANDLE_RECORD_
+        WHERE SENDER_ID_ = #{senderId, jdbcType=VARCHAR}
+        ORDER BY
+            CASE WHEN IS_REVOKED_ = 0 AND HANDLE_STATUS_ &lt;&gt; 'DONE' THEN 0 ELSE 1 END,
+            CREATE_TIME_ DESC, ID_ DESC
+    </select>
+
+    <select id="countPending" parameterType="string" resultType="long">
+        SELECT COUNT(*) FROM BIZ_HANDLE_RECORD_
+        WHERE ASSIGNEE_ID_ = #{assigneeId, jdbcType=VARCHAR}
+          AND HANDLE_STATUS_ &lt;&gt; 'DONE'
+          AND IS_REVOKED_ = 0
+    </select>
+
+    <select id="selectByProcInst" parameterType="string" resultMap="bizHandleRecordResultMap">
+        SELECT * FROM BIZ_HANDLE_RECORD_
+        WHERE PROC_INST_ID_ = #{processInstanceId, jdbcType=VARCHAR}
+        ORDER BY CREATE_TIME_ ASC, ID_ ASC
+    </select>
+
+    <!-- 报表取数：同上，只按时间切片，聚合在服务层完成 -->
+    <select id="selectForReport" parameterType="map" resultMap="bizHandleRecordResultMap">
+        SELECT * FROM BIZ_HANDLE_RECORD_
+        <where>
+            <if test="since != null">
+                CREATE_TIME_ &gt;= #{since, jdbcType=TIMESTAMP}
+            </if>
+        </where>
+        ORDER BY CREATE_TIME_ ASC, ID_ ASC
+    </select>
+
+    <select id="countByProcInstAndUser" parameterType="map" resultType="long">
+        SELECT COUNT(*) FROM BIZ_HANDLE_RECORD_
+        WHERE PROC_INST_ID_ = #{processInstanceId, jdbcType=VARCHAR}
+          AND ASSIGNEE_ID_ = #{assigneeId, jdbcType=VARCHAR}
+    </select>
+
+    <update id="updateStatus" parameterType="map">
+        UPDATE BIZ_HANDLE_RECORD_
+        SET HANDLE_STATUS_ = #{status, jdbcType=VARCHAR},
+            HANDLE_RESULT_ = #{handleResult, jdbcType=CLOB},
+            HANDLE_TIME_ = #{handleTime, jdbcType=TIMESTAMP},
+            UPDATE_TIME_ = CURRENT_TIMESTAMP
+        WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </update>
+
+    <update id="revoke" parameterType="map">
+        UPDATE BIZ_HANDLE_RECORD_
+        SET IS_REVOKED_ = 1,
+            REVOKE_TIME_ = #{revokeTime, jdbcType=TIMESTAMP},
+            REVOKE_REASON_ = #{revokeReason, jdbcType=VARCHAR},
+            UPDATE_TIME_ = #{revokeTime, jdbcType=TIMESTAMP}
+        WHERE ID_ = #{id, jdbcType=VARCHAR}
+          AND SENDER_ID_ = #{senderUserId, jdbcType=VARCHAR}
+          AND HANDLE_STATUS_ &lt;&gt; 'DONE'
+          AND IS_REVOKED_ = 0
+    </update>
+
+    <!-- 流程结束/撤回：未完成的阅办自动失效，已完成的结果照常归档 -->
+    <update id="invalidateByProcInst" parameterType="map">
+        UPDATE BIZ_HANDLE_RECORD_
+        SET IS_REVOKED_ = 1,
+            REVOKE_TIME_ = #{revokeTime, jdbcType=TIMESTAMP},
+            REVOKE_REASON_ = 'INVALID',
+            UPDATE_TIME_ = #{revokeTime, jdbcType=TIMESTAMP}
+        WHERE PROC_INST_ID_ = #{processInstanceId, jdbcType=VARCHAR}
+          AND HANDLE_STATUS_ &lt;&gt; 'DONE'
+          AND IS_REVOKED_ = 0
+    </update>
+
+    <update id="markOverdue" parameterType="java.util.Date">
+        UPDATE BIZ_HANDLE_RECORD_
+        SET HANDLE_STATUS_ = 'OVERDUE',
+            UPDATE_TIME_ = CURRENT_TIMESTAMP
+        WHERE DEADLINE_ IS NOT NULL
+          AND DEADLINE_ &lt; #{now, jdbcType=TIMESTAMP}
+          AND HANDLE_STATUS_ IN ('PENDING', 'HANDLING')
+          AND IS_REVOKED_ = 0
+    </update>
+
+</mapper>

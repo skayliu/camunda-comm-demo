@@ -21,6 +21,8 @@ spring:
         - classpath:db/migration/h2/V3__delegate_and_agent.sql
         - classpath:db/migration/h2/V4__agent_delegate_mode.sql
         - classpath:db/migration/h2/V5__dept_subprocess_registry.sql
+        - classpath:db/migration/h2/V6__cc_and_handle.sql
+        - classpath:db/migration/h2/V7__cc_note.sql
 
 camunda.bpm:
   # Camunda 7.24 默认不再自动部署 classpath 下的 BPMN，需显式开启

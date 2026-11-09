@@ -372,6 +372,20 @@
           </a-popconfirm>
           <a-button
             :disabled="!canInitiate"
+            :title="canInitiate ? '' : '仅当前待办处理人可传阅'"
+            @click="openCcHandle('cc')"
+          >
+            传阅
+          </a-button>
+          <a-button
+            :disabled="!canInitiate"
+            :title="canInitiate ? '' : '仅当前待办处理人可发起阅办'"
+            @click="openCcHandle('handle')"
+          >
+            阅办
+          </a-button>
+          <a-button
+            :disabled="!canInitiate"
             :title="canInitiate ? '' : '仅当前待办处理人可发起沟通'"
             @click="openStart"
           >
@@ -476,6 +490,15 @@
       @done="onDelegateDone"
     />
 
+    <CcHandleModal
+      v-model:open="ccHandleOpen"
+      :mode="ccHandleMode"
+      :task-id="taskId"
+      :process-instance-id="task.processInstanceId"
+      :task-name="task.taskName"
+      @done="load"
+    />
+
     <DeptCommModal
       v-model:open="deptCommOpen"
       :task-id="taskId"
@@ -492,6 +515,7 @@ import dayjs from 'dayjs'
 import { commApi, errorText, wbApi } from '../api'
 import TransferModal from './TransferModal.vue'
 import DeptCommModal from './DeptCommModal.vue'
+import CcHandleModal from './CcHandleModal.vue'
 import DelegateModal from './DelegateModal.vue'
 import DelegationChain from './DelegationChain.vue'
 import DeptSubTaskPanel from './DeptSubTaskPanel.vue'
@@ -520,6 +544,14 @@ const transferOpen = ref(false)
 // 部门沟通：与“发起沟通”并列的独立入口。部门沟通需要先选部门、再选该部门的
 // 部门沟通流程（通用三节点或专属流程），所以不能复用按人员多选的沟通弹窗。
 const deptCommOpen = ref(false)
+// 传阅/阅办共用弹窗：传阅只送达，阅办要反馈结果，两者都不进审批链
+const ccHandleOpen = ref(false)
+const ccHandleMode = ref('cc')
+
+function openCcHandle(mode) {
+  ccHandleMode.value = mode
+  ccHandleOpen.value = true
+}
 // 部门沟通流程面板：表单状态在子组件里，页脚按钮通过 expose 的 submit() 驱动提交
 const deptSubRef = ref(null)
 const deptSubSubmitting = ref(false)

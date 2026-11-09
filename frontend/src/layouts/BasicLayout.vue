@@ -45,6 +45,24 @@
           <template #icon><SwapOutlined /></template>
           <span class="menu-label">委托记录</span>
         </a-menu-item>
+        <a-menu-item key="cc">
+          <template #icon><MailOutlined /></template>
+          <span class="menu-label">
+            <span>我的待阅</span>
+            <a-badge v-if="ccUnread > 0" :count="ccUnread" :overflow-count="99" />
+          </span>
+        </a-menu-item>
+        <a-menu-item key="cc-sent">
+          <template #icon><ExportOutlined /></template>
+          <span class="menu-label">我的传阅</span>
+        </a-menu-item>
+        <a-menu-item key="handle">
+          <template #icon><SolutionOutlined /></template>
+          <span class="menu-label">
+            <span>我的承办</span>
+            <a-badge v-if="handlePending > 0" :count="handlePending" :overflow-count="99" />
+          </span>
+        </a-menu-item>
         <a-menu-item key="started">
           <template #icon><SendOutlined /></template>
           <span class="menu-label">我的发起</span>
@@ -54,6 +72,10 @@
           <span class="menu-label">代理设置</span>
         </a-menu-item>
         <a-menu-divider v-if="isAdmin" />
+        <a-menu-item v-if="isAdmin" key="cc-handle-report">
+          <template #icon><BarChartOutlined /></template>
+          <span class="menu-label">传阅与承办统计</span>
+        </a-menu-item>
         <a-menu-item v-if="isAdmin" key="subprocess-defs">
           <template #icon><ApartmentOutlined /></template>
           <span class="menu-label">部门沟通流程登记</span>
@@ -117,18 +139,22 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ApartmentOutlined,
+  BarChartOutlined,
   CheckCircleOutlined,
+  ExportOutlined,
   InboxOutlined,
   LogoutOutlined,
+  MailOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   ReloadOutlined,
   SendOutlined,
+  SolutionOutlined,
   SwapOutlined,
   UserOutlined,
   UserSwitchOutlined
 } from '@ant-design/icons-vue'
-import { authApi, getUser, isCamundaAdmin, logout, wbApi } from '../api'
+import { authApi, ccApi, getUser, handleApi, isCamundaAdmin, logout, wbApi } from '../api'
 
 const route = useRoute()
 const router = useRouter()
@@ -138,6 +164,9 @@ const reloadKey = ref(0)
 const todoCount = ref(0)
 // 我委托出去、对方还没交回的条数：显示在待办中心菜单上，一眼看到有多少活压在别人手里
 const delegatingCount = ref(0)
+// 未读传阅 / 待承办：两个独立角标，避免与审批待办混成一个数字
+const ccUnread = ref(0)
+const handlePending = ref(0)
 const displayName = ref('')
 const user = ref(getUser())
 // 控制台菜单的可见性：来自 /auth/me 的 camundaAdmin，接口侧仍会独立校验
@@ -169,15 +198,23 @@ async function handleLogout() {
 
 async function loadCount() {
   // 两个数各自独立：任一接口失败都不能把另一个角标清空
-  const [todoRes, delegationRes] = await Promise.allSettled([
+  const [todoRes, delegationRes, ccRes, handleRes] = await Promise.allSettled([
     wbApi.todo({ page: 1, size: 1, type: 'all' }),
-    wbApi.pendingDelegationCount()
+    wbApi.pendingDelegationCount(),
+    ccApi.unreadCount(),
+    handleApi.pendingCount()
   ])
   if (todoRes.status === 'fulfilled') {
     todoCount.value = (todoRes.value.stats && todoRes.value.stats.total) || 0
   }
   if (delegationRes.status === 'fulfilled') {
     delegatingCount.value = (delegationRes.value && delegationRes.value.count) || 0
+  }
+  if (ccRes.status === 'fulfilled') {
+    ccUnread.value = (ccRes.value && ccRes.value.count) || 0
+  }
+  if (handleRes.status === 'fulfilled') {
+    handlePending.value = (handleRes.value && handleRes.value.count) || 0
   }
 }
 

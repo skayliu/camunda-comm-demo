@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.camundademo.persistence.BizCcRecordManager">
+
+    <resultMap id="bizCcRecordResultMap" type="com.example.camundademo.entity.BizCcRecord">
+        <id property="id" column="ID_" jdbcType="VARCHAR"/>
+        <result property="processInstanceId" column="PROC_INST_ID_" jdbcType="VARCHAR"/>
+        <result property="taskId" column="TASK_ID_" jdbcType="VARCHAR"/>
+        <result property="processDefinitionKey" column="PROC_DEF_KEY_" jdbcType="VARCHAR"/>
+        <result property="taskDefinitionKey" column="TASK_DEF_KEY_" jdbcType="VARCHAR"/>
+        <result property="title" column="TITLE_" jdbcType="VARCHAR"/>
+        <result property="ccUserId" column="CC_USER_ID_" jdbcType="VARCHAR"/>
+        <result property="senderUserId" column="SENDER_USER_ID_" jdbcType="VARCHAR"/>
+        <result property="ccType" column="CC_TYPE_" jdbcType="VARCHAR"/>
+        <result property="note" column="NOTE_" jdbcType="VARCHAR"/>
+        <result property="read" column="IS_READ_" jdbcType="INTEGER"/>
+        <result property="readTime" column="READ_TIME_" jdbcType="TIMESTAMP"/>
+        <result property="revoked" column="IS_REVOKED_" jdbcType="INTEGER"/>
+        <result property="revokeTime" column="REVOKE_TIME_" jdbcType="TIMESTAMP"/>
+        <result property="revokeReason" column="REVOKE_REASON_" jdbcType="VARCHAR"/>
+        <result property="createTime" column="CREATE_TIME_" jdbcType="TIMESTAMP"/>
+        <result property="updateTime" column="UPDATE_TIME_" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <insert id="insertBizCcRecord" parameterType="com.example.camundademo.entity.BizCcRecord">
+        INSERT INTO BIZ_CC_RECORD_ (ID_, PROC_INST_ID_, TASK_ID_, PROC_DEF_KEY_, TASK_DEF_KEY_, TITLE_,
+            CC_USER_ID_, SENDER_USER_ID_, CC_TYPE_, NOTE_, IS_READ_, READ_TIME_, IS_REVOKED_, REVOKE_TIME_,
+            REVOKE_REASON_, CREATE_TIME_, UPDATE_TIME_)
+        VALUES (#{id, jdbcType=VARCHAR}, #{processInstanceId, jdbcType=VARCHAR}, #{taskId, jdbcType=VARCHAR},
+                #{processDefinitionKey, jdbcType=VARCHAR}, #{taskDefinitionKey, jdbcType=VARCHAR},
+                #{title, jdbcType=VARCHAR}, #{ccUserId, jdbcType=VARCHAR}, #{senderUserId, jdbcType=VARCHAR},
+                #{ccType, jdbcType=VARCHAR}, #{note, jdbcType=VARCHAR}, #{read, jdbcType=INTEGER},
+                #{readTime, jdbcType=TIMESTAMP},
+                #{revoked, jdbcType=INTEGER}, #{revokeTime, jdbcType=TIMESTAMP},
+                #{revokeReason, jdbcType=VARCHAR}, #{createTime, jdbcType=TIMESTAMP},
+                #{updateTime, jdbcType=TIMESTAMP})
+    </insert>
+
+    <update id="updateBizCcRecord" parameterType="com.example.camundademo.entity.BizCcRecord">
+        UPDATE BIZ_CC_RECORD_
+        SET IS_READ_ = #{read, jdbcType=INTEGER},
+            READ_TIME_ = #{readTime, jdbcType=TIMESTAMP},
+            IS_REVOKED_ = #{revoked, jdbcType=INTEGER},
+            REVOKE_TIME_ = #{revokeTime, jdbcType=TIMESTAMP},
+            REVOKE_REASON_ = #{revokeReason, jdbcType=VARCHAR},
+            UPDATE_TIME_ = #{updateTime, jdbcType=TIMESTAMP}
+        WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </update>
+
+    <delete id="deleteBizCcRecord" parameterType="string">
+        DELETE FROM BIZ_CC_RECORD_ WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </delete>
+
+    <select id="selectBizCcRecord" parameterType="string" resultMap="bizCcRecordResultMap">
+        SELECT * FROM BIZ_CC_RECORD_ WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </select>
+
+    <!-- 去重口径：同一流程实例下同一个人只保留一条有效传阅 -->
+    <select id="countActive" parameterType="map" resultType="long">
+        SELECT COUNT(*) FROM BIZ_CC_RECORD_
+        WHERE PROC_INST_ID_ = #{processInstanceId, jdbcType=VARCHAR}
+          AND CC_USER_ID_ = #{ccUserId, jdbcType=VARCHAR}
+          AND IS_REVOKED_ = 0
+    </select>
+
+    <select id="selectActiveByProcInst" parameterType="string" resultMap="bizCcRecordResultMap">
+        SELECT * FROM BIZ_CC_RECORD_
+        WHERE PROC_INST_ID_ = #{processInstanceId, jdbcType=VARCHAR}
+          AND IS_REVOKED_ = 0
+        ORDER BY CREATE_TIME_ ASC, ID_ ASC
+    </select>
+
+    <!-- 我的传阅：未读置顶，再按时间倒序 -->
+    <select id="selectByCcUser" parameterType="string" resultMap="bizCcRecordResultMap">
+        SELECT * FROM BIZ_CC_RECORD_
+        WHERE CC_USER_ID_ = #{ccUserId, jdbcType=VARCHAR}
+        ORDER BY IS_READ_ ASC, CREATE_TIME_ DESC, ID_ DESC
+    </select>
+
+    <!--
+        我发出的传阅：按发送人反查，发送时间倒序。
+        与 selectByCcUser 互为镜像——同一张表，两个视角。
+        已撤回/已失效的也返回，发送方需要看到自己发过什么、哪条没能送达。
+    -->
+    <select id="selectBySender" parameterType="string" resultMap="bizCcRecordResultMap">
+        SELECT * FROM BIZ_CC_RECORD_
+        WHERE SENDER_USER_ID_ = #{senderUserId, jdbcType=VARCHAR}
+        ORDER BY CREATE_TIME_ DESC, ID_ DESC
+    </select>
+
+    <select id="countUnread" parameterType="string" resultType="long">
+        SELECT COUNT(*) FROM BIZ_CC_RECORD_
+        WHERE CC_USER_ID_ = #{ccUserId, jdbcType=VARCHAR}
+          AND IS_READ_ = 0
+          AND IS_REVOKED_ = 0
+    </select>
+
+    <select id="selectByProcInst" parameterType="string" resultMap="bizCcRecordResultMap">
+        SELECT * FROM BIZ_CC_RECORD_
+        WHERE PROC_INST_ID_ = #{processInstanceId, jdbcType=VARCHAR}
+        ORDER BY CREATE_TIME_ ASC, ID_ ASC
+    </select>
+
+    <!--
+        报表取数：只按时间切片，不做 SQL 聚合。
+        统计口径（已读率、撤回、Top 排行）统一在服务层用 Java 计算，
+        这样 H2 / MySQL / PostgreSQL 等各数据库的分组、日期函数差异不会影响结果。
+    -->
+    <select id="selectForReport" parameterType="map" resultMap="bizCcRecordResultMap">
+        SELECT * FROM BIZ_CC_RECORD_
+        <where>
+            <if test="since != null">
+                CREATE_TIME_ &gt;= #{since, jdbcType=TIMESTAMP}
+            </if>
+        </where>
+        ORDER BY CREATE_TIME_ ASC, ID_ ASC
+    </select>
+
+    <!-- 标已读只改业务状态：永远不会触碰 ACT_RU_TASK -->
+    <update id="markRead" parameterType="map">
+        UPDATE BIZ_CC_RECORD_
+        SET IS_READ_ = 1,
+            READ_TIME_ = #{readTime, jdbcType=TIMESTAMP},
+            UPDATE_TIME_ = #{readTime, jdbcType=TIMESTAMP}
+        WHERE ID_ = #{id, jdbcType=VARCHAR}
+          AND CC_USER_ID_ = #{ccUserId, jdbcType=VARCHAR}
+          AND IS_READ_ = 0
+          AND IS_REVOKED_ = 0
+    </update>
+
+    <update id="batchMarkRead" parameterType="map">
+        UPDATE BIZ_CC_RECORD_
+        SET IS_READ_ = 1,
+            READ_TIME_ = #{readTime, jdbcType=TIMESTAMP},
+            UPDATE_TIME_ = #{readTime, jdbcType=TIMESTAMP}
+        WHERE CC_USER_ID_ = #{ccUserId, jdbcType=VARCHAR}
+          AND IS_READ_ = 0
+          AND IS_REVOKED_ = 0
+          AND ID_ IN
+        <foreach collection="list" item="id" open="(" separator="," close=")">
+            #{id, jdbcType=VARCHAR}
+        </foreach>
+    </update>
+
+    <update id="revoke" parameterType="map">
+        UPDATE BIZ_CC_RECORD_
+        SET IS_REVOKED_ = 1,
+            REVOKE_TIME_ = #{revokeTime, jdbcType=TIMESTAMP},
+            REVOKE_REASON_ = #{revokeReason, jdbcType=VARCHAR},
+            UPDATE_TIME_ = #{revokeTime, jdbcType=TIMESTAMP}
+        WHERE ID_ = #{id, jdbcType=VARCHAR}
+          AND SENDER_USER_ID_ = #{senderUserId, jdbcType=VARCHAR}
+          AND IS_READ_ = 0
+          AND IS_REVOKED_ = 0
+    </update>
+
+    <!-- 只失效未读传阅；已读的保留，审计要能查到“他确实看过了” -->
+    <update id="invalidateByProcInst" parameterType="map">
+        UPDATE BIZ_CC_RECORD_
+        SET IS_REVOKED_ = 1,
+            REVOKE_TIME_ = #{revokeTime, jdbcType=TIMESTAMP},
+            REVOKE_REASON_ = 'INVALID',
+            UPDATE_TIME_ = #{revokeTime, jdbcType=TIMESTAMP}
+        WHERE PROC_INST_ID_ = #{processInstanceId, jdbcType=VARCHAR}
+          AND IS_READ_ = 0
+          AND IS_REVOKED_ = 0
+    </update>
+
+</mapper>

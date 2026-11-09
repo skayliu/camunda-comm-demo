@@ -382,4 +382,92 @@ export const deptSubApi = {
   }
 }
 
+/**
+ * 传阅：只送达、不待办、不阻塞流程。
+ * 传阅人只有“查看/标已读”，没有任何审批操作入口。
+ */
+export const ccApi = {
+  add(payload) {
+    return http.post('/cc/add', payload)
+  },
+  mine(params) {
+    return http.get('/cc/mine', { params })
+  },
+  /** 我的传阅：status = ALL / UNREAD / READ / REVOKED */
+  sent(params) {
+    return http.get('/cc/sent', { params })
+  },
+  /** 我的传阅 · 按流程聚合：一眼看清某流程传阅给谁、谁还没读 */
+  sentGrouped(params) {
+    return http.get('/cc/sent/grouped', { params })
+  },
+  unreadCount() {
+    return http.get('/cc/unread-count')
+  },
+  markRead(id) {
+    return http.post(`/cc/${id}/read`)
+  },
+  batchMarkRead(ids) {
+    return http.post('/cc/read-batch', { ids })
+  },
+  revoke(id) {
+    return http.post(`/cc/${id}/revoke`)
+  },
+  /** 按流程批量撤回：只撤本人发出、对方未读的记录 */
+  revokeByProcess(processInstanceId) {
+    return http.post(`/cc/process/${processInstanceId}/revoke`)
+  },
+  processRecords(processInstanceId) {
+    return http.get(`/cc/process/${processInstanceId}`)
+  },
+  targets(keyword) {
+    return http.get('/cc/targets', { params: { keyword } })
+  }
+}
+
+/**
+ * 阅办（承办）：有办理时限与结果，但不进审批待办、不阻塞主流程。
+ */
+export const handleApi = {
+  add(payload) {
+    return http.post('/handle', payload)
+  },
+  mine(params) {
+    return http.get('/handle/mine', { params })
+  },
+  /** 我发出的阅办：status = ALL / PENDING / HANDLING / OVERDUE / DONE / REVOKED */
+  sent(params) {
+    return http.get('/handle/sent', { params })
+  },
+  pendingCount() {
+    return http.get('/handle/pending-count')
+  },
+  start(id) {
+    return http.post(`/handle/${id}/start`)
+  },
+  submit(id, result) {
+    return http.post(`/handle/${id}/submit`, { result })
+  },
+  revoke(id) {
+    return http.post(`/handle/${id}/revoke`)
+  },
+  processRecords(processInstanceId) {
+    return http.get(`/handle/process/${processInstanceId}`)
+  },
+  users(keyword) {
+    return http.get('/handle/users', { params: { keyword } })
+  }
+}
+
+/**
+ * 传阅 / 承办统计报表（仅 camunda-admin）。
+ * 服务端只读聚合，不会改传阅已读状态，也不会动承办进度。
+ */
+export const reportApi = {
+  /** days=0 表示全部历史 */
+  ccHandle(params) {
+    return http.get('/report/cc-handle', { params })
+  }
+}
+
 export default http

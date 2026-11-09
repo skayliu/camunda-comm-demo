@@ -32,6 +32,26 @@ const routes = [
         meta: { title: '我的发起' }
       },
       {
+        path: 'cc',
+        name: 'cc',
+        component: () => import('../views/CcList.vue'),
+        meta: { title: '我的待阅' }
+      },
+      {
+        // 发送人视角：我传阅给了谁、对方读了没有、哪条还没送达可以撤回。
+        // 与“我的待阅”共用同一张业务表，接口是 /api/cc/sent（发送人取认证上下文）。
+        path: 'cc-sent',
+        name: 'cc-sent',
+        component: () => import('../views/CcSentList.vue'),
+        meta: { title: '我的传阅' }
+      },
+      {
+        path: 'handle',
+        name: 'handle',
+        component: () => import('../views/HandleList.vue'),
+        meta: { title: '我的承办' }
+      },
+      {
         path: 'agent',
         name: 'agent',
         component: () => import('../views/AgentRules.vue'),
@@ -42,6 +62,14 @@ const routes = [
         name: 'delegation',
         component: () => import('../views/DelegationList.vue'),
         meta: { title: '委托记录' }
+      },
+      {
+        // 传阅 / 承办统计：含“谁传阅给谁、谁逾期未办”的全局数据，
+        // 与登记页一样只对 camunda-admin 开放，接口侧 /api/report/** 会再校验一次。
+        path: 'cc-handle-report',
+        name: 'cc-handle-report',
+        component: () => import('../views/CcHandleReport.vue'),
+        meta: { title: '传阅与承办统计', adminOnly: true }
       },
       {
         // 控制台管理功能：只对 camunda-admin 开放。
