@@ -48,12 +48,20 @@ public class DemoUserInitializer implements ApplicationRunner {
     private static Map<String, List<String>> memberships() {
         Map<String, List<String>> map = new LinkedHashMap<>();
         map.put("admin", List.of("admin", "camunda-admin"));
-        // 部门沟通的演示数据：部门即 Camunda 的 group，dept_handle 用候选组承接，
-        // 部门内任意成员认领后提交意见。没有成员时部门沟通无人能处理。
-        map.put("alice", List.of("dept_it"));
+        // 部门沟通的演示数据：部门即 Camunda 的 group，部门内任意成员认领后提交意见。
+        // 没有成员时部门沟通无人能处理。
+        // <deptId>_clerk 是部门文书岗：通用三节点流程的文书由它解析，
+        // 未配置时回退到部门成员第一个。
+        map.put("alice", List.of("dept_it", "dept_it_clerk"));
         map.put("bob", List.of("dept_it"));
-        map.put("carol", List.of("dept_admin"));
+        map.put("carol", List.of("dept_admin", "dept_admin_clerk"));
         map.put("dave", List.of("dept_admin"));
+        // 法务部：专属流程按固定岗位流转（合规初审 → 业务线专项审查 → 经理复核）
+        map.put("frank", List.of("dept_legal", "dept_legal_clerk", "legal_business", "legal_manager"));
+        map.put("grace", List.of("dept_legal", "legal_compliance"));
+        // 财务部：预算初审 → 资金岗确认 → 经理审批
+        map.put("henry", List.of("dept_finance", "dept_finance_clerk", "finance_budget", "finance_manager"));
+        map.put("mallory", List.of("dept_finance", "finance_treasury"));
         return map;
     }
 
@@ -63,6 +71,18 @@ public class DemoUserInitializer implements ApplicationRunner {
         map.put("camunda-admin", "Camunda BPM Administrators");
         map.put("dept_it", "IT 部");
         map.put("dept_admin", "行政部");
+        map.put("dept_legal", "法务部");
+        map.put("dept_finance", "财务部");
+        map.put("dept_it_clerk", "IT 部文书");
+        map.put("dept_admin_clerk", "行政部文书");
+        map.put("dept_legal_clerk", "法务部文书");
+        map.put("dept_finance_clerk", "财务部文书");
+        map.put("legal_compliance", "法务合规岗");
+        map.put("legal_business", "法务业务线专员");
+        map.put("legal_manager", "法务经理");
+        map.put("finance_budget", "预算岗");
+        map.put("finance_treasury", "资金岗");
+        map.put("finance_manager", "财务经理");
         return map;
     }
 
@@ -71,6 +91,8 @@ public class DemoUserInitializer implements ApplicationRunner {
         Map<String, String> map = new LinkedHashMap<>();
         map.put("dept_it", "DEPARTMENT");
         map.put("dept_admin", "DEPARTMENT");
+        map.put("dept_legal", "DEPARTMENT");
+        map.put("dept_finance", "DEPARTMENT");
         return map;
     }
 

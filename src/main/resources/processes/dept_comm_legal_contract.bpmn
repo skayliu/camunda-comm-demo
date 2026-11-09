@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+                  id="Definitions_DeptCommLegal"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+
+    <!--
+      法务部合同审查流程（部门专属示例）。
+
+      与通用三节点流程的区别：节点、岗位、顺序全部提前固定，不走文书动态选人；
+      前三个节点用 candidateGroups 按岗位承接，最后一个节点由文书汇总出正式意见。
+      但入参、出参、结束监听器与通用流程完全一致，主流程调用方式没有任何差别。
+    -->
+    <bpmn:process id="dept_comm_legal_contract" name="法务部合同审查流程" isExecutable="true"
+                  camunda:historyTimeToLive="180">
+        <bpmn:documentation>合规初审 → 业务线专项审查 → 法务经理复核 → 出具正式法律意见。</bpmn:documentation>
+
+        <bpmn:startEvent id="legal_start" name="启动合同审查">
+            <bpmn:extensionElements>
+                <camunda:executionListener event="start" delegateExpression="${deptSubProcessStartListener}"/>
+            </bpmn:extensionElements>
+            <bpmn:outgoing>flow_legal_start_compliance</bpmn:outgoing>
+        </bpmn:startEvent>
+
+        <bpmn:userTask id="Task_LegalCompliance" name="合规初审" camunda:candidateGroups="legal_compliance">
+            <bpmn:extensionElements>
+                <camunda:taskListener event="complete" delegateExpression="${deptCommNodeOpinionListener}"/>
+                <camunda:formData>
+                    <camunda:formField id="nodeOpinion" label="合规风险点" type="string" required="true"/>
+                </camunda:formData>
+            </bpmn:extensionElements>
+            <bpmn:incoming>flow_legal_start_compliance</bpmn:incoming>
+            <bpmn:outgoing>flow_legal_compliance_business</bpmn:outgoing>
+        </bpmn:userTask>
+
+        <bpmn:userTask id="Task_LegalBusiness" name="业务线专项审查" camunda:candidateGroups="legal_business">
+            <bpmn:extensionElements>
+                <camunda:taskListener event="complete" delegateExpression="${deptCommNodeOpinionListener}"/>
+                <camunda:formData>
+                    <camunda:formField id="nodeOpinion" label="业务条款意见" type="string" required="true"/>
+                </camunda:formData>
+            </bpmn:extensionElements>
+            <bpmn:incoming>flow_legal_compliance_business</bpmn:incoming>
+            <bpmn:outgoing>flow_legal_business_manager</bpmn:outgoing>
+        </bpmn:userTask>
+
+        <bpmn:userTask id="Task_LegalManager" name="法务经理复核" camunda:candidateGroups="legal_manager">
+            <bpmn:extensionElements>
+                <camunda:taskListener event="complete" delegateExpression="${deptCommNodeOpinionListener}"/>
+                <camunda:formData>
+                    <camunda:formField id="nodeOpinion" label="复核结论" type="string" required="true"/>
+                </camunda:formData>
+            </bpmn:extensionElements>
+            <bpmn:incoming>flow_legal_business_manager</bpmn:incoming>
+            <bpmn:outgoing>flow_legal_manager_summary</bpmn:outgoing>
+        </bpmn:userTask>
+
+        <bpmn:userTask id="Task_LegalSummary" name="出具正式法律意见" camunda:assignee="${clerkUserId}">
+            <bpmn:extensionElements>
+                <camunda:taskListener event="complete" delegateExpression="${deptCommSummaryListener}"/>
+                <camunda:formData>
+                    <camunda:formField id="finalOpinion" label="部门最终意见" type="string" required="true"/>
+                </camunda:formData>
+            </bpmn:extensionElements>
+            <bpmn:incoming>flow_legal_manager_summary</bpmn:incoming>
+            <bpmn:outgoing>flow_legal_summary_end</bpmn:outgoing>
+        </bpmn:userTask>
+
+        <bpmn:endEvent id="legal_end" name="合同审查完成">
+            <bpmn:extensionElements>
+                <camunda:executionListener event="end" delegateExpression="${deptSubProcessEndListener}"/>
+            </bpmn:extensionElements>
+            <bpmn:incoming>flow_legal_summary_end</bpmn:incoming>
+        </bpmn:endEvent>
+
+        <bpmn:sequenceFlow id="flow_legal_start_compliance" sourceRef="legal_start" targetRef="Task_LegalCompliance"/>
+        <bpmn:sequenceFlow id="flow_legal_compliance_business" sourceRef="Task_LegalCompliance" targetRef="Task_LegalBusiness"/>
+        <bpmn:sequenceFlow id="flow_legal_business_manager" sourceRef="Task_LegalBusiness" targetRef="Task_LegalManager"/>
+        <bpmn:sequenceFlow id="flow_legal_manager_summary" sourceRef="Task_LegalManager" targetRef="Task_LegalSummary"/>
+        <bpmn:sequenceFlow id="flow_legal_summary_end" sourceRef="Task_LegalSummary" targetRef="legal_end"/>
+    </bpmn:process>
+
+    <bpmndi:BPMNDiagram id="BPMNDiagram_Legal">
+        <bpmndi:BPMNPlane id="BPMNPlane_Legal" bpmnElement="dept_comm_legal_contract">
+            <bpmndi:BPMNShape id="Shape_legal_start" bpmnElement="legal_start">
+                <dc:Bounds x="40" y="142" width="36" height="36"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_legal_compliance" bpmnElement="Task_LegalCompliance">
+                <dc:Bounds x="120" y="120" width="120" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_legal_business" bpmnElement="Task_LegalBusiness">
+                <dc:Bounds x="290" y="120" width="120" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_legal_manager" bpmnElement="Task_LegalManager">
+                <dc:Bounds x="460" y="120" width="120" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_legal_summary" bpmnElement="Task_LegalSummary">
+                <dc:Bounds x="630" y="120" width="120" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_legal_end" bpmnElement="legal_end">
+                <dc:Bounds x="800" y="142" width="36" height="36"/>
+            </bpmndi:BPMNShape>
+
+            <bpmndi:BPMNEdge id="Edge_legal_start_compliance" bpmnElement="flow_legal_start_compliance">
+                <di:waypoint x="76" y="160"/>
+                <di:waypoint x="120" y="160"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Edge_legal_compliance_business" bpmnElement="flow_legal_compliance_business">
+                <di:waypoint x="240" y="160"/>
+                <di:waypoint x="290" y="160"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Edge_legal_business_manager" bpmnElement="flow_legal_business_manager">
+                <di:waypoint x="410" y="160"/>
+                <di:waypoint x="460" y="160"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Edge_legal_manager_summary" bpmnElement="flow_legal_manager_summary">
+                <di:waypoint x="580" y="160"/>
+                <di:waypoint x="630" y="160"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Edge_legal_summary_end" bpmnElement="flow_legal_summary_end">
+                <di:waypoint x="750" y="160"/>
+                <di:waypoint x="800" y="160"/>
+            </bpmndi:BPMNEdge>
+        </bpmndi:BPMNPlane>
+    </bpmndi:BPMNDiagram>
+</bpmn:definitions>

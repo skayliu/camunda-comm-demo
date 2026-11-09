@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+                  id="Definitions_DeptCommFinance"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+
+    <!--
+      财务部预算审核流程（部门专属示例）：预算初审 → 资金岗确认 → 财务经理审批 → 文书汇总。
+    -->
+    <bpmn:process id="dept_comm_finance_budget" name="财务部预算审核流程" isExecutable="true"
+                  camunda:historyTimeToLive="180">
+        <bpmn:documentation>预算专员初审 → 资金岗确认 → 财务经理审批 → 财务文书汇总出意见。</bpmn:documentation>
+
+        <bpmn:startEvent id="finance_start" name="启动预算审核">
+            <bpmn:extensionElements>
+                <camunda:executionListener event="start" delegateExpression="${deptSubProcessStartListener}"/>
+            </bpmn:extensionElements>
+            <bpmn:outgoing>flow_finance_start_budget</bpmn:outgoing>
+        </bpmn:startEvent>
+
+        <bpmn:userTask id="Task_FinanceBudget" name="预算专员初审" camunda:candidateGroups="finance_budget">
+            <bpmn:extensionElements>
+                <camunda:taskListener event="complete" delegateExpression="${deptCommNodeOpinionListener}"/>
+                <camunda:formData>
+                    <camunda:formField id="nodeOpinion" label="预算初审意见" type="string" required="true"/>
+                </camunda:formData>
+            </bpmn:extensionElements>
+            <bpmn:incoming>flow_finance_start_budget</bpmn:incoming>
+            <bpmn:outgoing>flow_finance_budget_treasury</bpmn:outgoing>
+        </bpmn:userTask>
+
+        <bpmn:userTask id="Task_FinanceTreasury" name="资金岗确认" camunda:candidateGroups="finance_treasury">
+            <bpmn:extensionElements>
+                <camunda:taskListener event="complete" delegateExpression="${deptCommNodeOpinionListener}"/>
+                <camunda:formData>
+                    <camunda:formField id="nodeOpinion" label="资金可用性确认" type="string" required="true"/>
+                </camunda:formData>
+            </bpmn:extensionElements>
+            <bpmn:incoming>flow_finance_budget_treasury</bpmn:incoming>
+            <bpmn:outgoing>flow_finance_treasury_manager</bpmn:outgoing>
+        </bpmn:userTask>
+
+        <bpmn:userTask id="Task_FinanceManager" name="财务经理审批" camunda:candidateGroups="finance_manager">
+            <bpmn:extensionElements>
+                <camunda:taskListener event="complete" delegateExpression="${deptCommNodeOpinionListener}"/>
+                <camunda:formData>
+                    <camunda:formField id="nodeOpinion" label="审批意见" type="string" required="true"/>
+                </camunda:formData>
+            </bpmn:extensionElements>
+            <bpmn:incoming>flow_finance_treasury_manager</bpmn:incoming>
+            <bpmn:outgoing>flow_finance_manager_summary</bpmn:outgoing>
+        </bpmn:userTask>
+
+        <bpmn:userTask id="Task_FinanceSummary" name="财务文书汇总出意见" camunda:assignee="${clerkUserId}">
+            <bpmn:extensionElements>
+                <camunda:taskListener event="complete" delegateExpression="${deptCommSummaryListener}"/>
+                <camunda:formData>
+                    <camunda:formField id="finalOpinion" label="部门最终意见" type="string" required="true"/>
+                </camunda:formData>
+            </bpmn:extensionElements>
+            <bpmn:incoming>flow_finance_manager_summary</bpmn:incoming>
+            <bpmn:outgoing>flow_finance_summary_end</bpmn:outgoing>
+        </bpmn:userTask>
+
+        <bpmn:endEvent id="finance_end" name="预算审核完成">
+            <bpmn:extensionElements>
+                <camunda:executionListener event="end" delegateExpression="${deptSubProcessEndListener}"/>
+            </bpmn:extensionElements>
+            <bpmn:incoming>flow_finance_summary_end</bpmn:incoming>
+        </bpmn:endEvent>
+
+        <bpmn:sequenceFlow id="flow_finance_start_budget" sourceRef="finance_start" targetRef="Task_FinanceBudget"/>
+        <bpmn:sequenceFlow id="flow_finance_budget_treasury" sourceRef="Task_FinanceBudget" targetRef="Task_FinanceTreasury"/>
+        <bpmn:sequenceFlow id="flow_finance_treasury_manager" sourceRef="Task_FinanceTreasury" targetRef="Task_FinanceManager"/>
+        <bpmn:sequenceFlow id="flow_finance_manager_summary" sourceRef="Task_FinanceManager" targetRef="Task_FinanceSummary"/>
+        <bpmn:sequenceFlow id="flow_finance_summary_end" sourceRef="Task_FinanceSummary" targetRef="finance_end"/>
+    </bpmn:process>
+
+    <bpmndi:BPMNDiagram id="BPMNDiagram_Finance">
+        <bpmndi:BPMNPlane id="BPMNPlane_Finance" bpmnElement="dept_comm_finance_budget">
+            <bpmndi:BPMNShape id="Shape_finance_start" bpmnElement="finance_start">
+                <dc:Bounds x="40" y="142" width="36" height="36"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_finance_budget" bpmnElement="Task_FinanceBudget">
+                <dc:Bounds x="120" y="120" width="120" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_finance_treasury" bpmnElement="Task_FinanceTreasury">
+                <dc:Bounds x="290" y="120" width="120" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_finance_manager" bpmnElement="Task_FinanceManager">
+                <dc:Bounds x="460" y="120" width="120" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_finance_summary" bpmnElement="Task_FinanceSummary">
+                <dc:Bounds x="630" y="120" width="120" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_finance_end" bpmnElement="finance_end">
+                <dc:Bounds x="800" y="142" width="36" height="36"/>
+            </bpmndi:BPMNShape>
+
+            <bpmndi:BPMNEdge id="Edge_finance_start_budget" bpmnElement="flow_finance_start_budget">
+                <di:waypoint x="76" y="160"/>
+                <di:waypoint x="120" y="160"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Edge_finance_budget_treasury" bpmnElement="flow_finance_budget_treasury">
+                <di:waypoint x="240" y="160"/>
+                <di:waypoint x="290" y="160"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Edge_finance_treasury_manager" bpmnElement="flow_finance_treasury_manager">
+                <di:waypoint x="410" y="160"/>
+                <di:waypoint x="460" y="160"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Edge_finance_manager_summary" bpmnElement="flow_finance_manager_summary">
+                <di:waypoint x="580" y="160"/>
+                <di:waypoint x="630" y="160"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Edge_finance_summary_end" bpmnElement="flow_finance_summary_end">
+                <di:waypoint x="750" y="160"/>
+                <di:waypoint x="800" y="160"/>
+            </bpmndi:BPMNEdge>
+        </bpmndi:BPMNPlane>
+    </bpmndi:BPMNDiagram>
+</bpmn:definitions>

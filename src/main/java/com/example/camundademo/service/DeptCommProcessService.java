@@ -1,6 +1,7 @@
 package com.example.camundademo.service;
 
 import com.example.camundademo.entity.BizCommTask;
+import com.example.camundademo.entity.BizSubProcessDef;
 import com.example.camundademo.persistence.BizCommTaskManager;
 import org.camunda.bpm.engine.IdentityService;
 import org.camunda.bpm.engine.RepositoryService;
@@ -67,6 +68,12 @@ public class DeptCommProcessService {
     public static final String VAR_PARENT_PROC_INST_ID = "parentProcessInstanceId";
     /** 部门反馈内容，由反馈接口写入，完成监听器读取后落业务表 */
     public static final String VAR_REPLY = "deptReply";
+    /** 原始沟通内容（统一契约入参，专属流程内部的节点可自行引用） */
+    public static final String VAR_ORIGIN_CONTENT = "originContent";
+    /** 沟通会话ID（与 commRecordId 等价，保留文档中的契约名） */
+    public static final String VAR_COMMUNICATE_ID = "communicateId";
+    /** 本次实际使用的子流程 key，便于跟踪图/排查时直接看出走了哪个部门流程 */
+    public static final String VAR_SUB_PROCESS_KEY = "commSubProcessKey";
 
     @Autowired
     private RuntimeService runtimeService;
@@ -79,6 +86,9 @@ public class DeptCommProcessService {
 
     @Autowired
     private RepositoryService repositoryService;
+
+    @Autowired
+    private SubProcessDefService subProcessDefService;
 
     /** 启动子流程后返回的实例与节点信息 */
     public static final class Started {
@@ -107,18 +117,45 @@ public class DeptCommProcessService {
      */
     public Started start(String commRecordId, String sessionId, Task rootTask, String deptId,
                          String deptName, String content, String initiator, int round) {
+        return start(commRecordId, sessionId, rootTask, deptId, deptName, content, initiator, round,
+                PROCESS_KEY);
+    }
+
+    /**
+     * 启动部门沟通子流程（按注册表选定的 key）。
+     *
+     * @param subProcessKey 注册表里的流程定义 key；为空时回退到旧版单节点流程
+     */
+    public Started start(String commRecordId, String sessionId, Task rootTask, String deptId,
+                         String deptName, String content, String initiator, int round,
+                         String subProcessKey) {
         requireDept(deptId);
+        String key = (subProcessKey == null || subProcessKey.isBlank()) ? PROCESS_KEY : subProcessKey;
+        if (subProcessKey != null && !subProcessKey.isBlank() && !PROCESS_KEY.equals(subProcessKey)) {
+            // 前端传上来的 key 不能直接信：必须登记且启用、引擎里已部署，
+            // 且只能选“全部门通用”或该部门自己的流程，否则可以拿任意流程 key
+            // 冒充部门沟通启动实例，越权拿到别的流程数据。
+            BizSubProcessDef def = subProcessDefService.requireAvailable(subProcessKey);
+            if (!def.isGeneral() && !deptId.equals(def.getDeptId())) {
+                throw new BusinessException("流程「" + def.getProcessName() + "」不属于部门 "
+                        + deptId + "，请重新选择");
+            }
+            key = def.getProcessKey();
+        }
 
         Map<String, Object> vars = new HashMap<>();
         vars.put(VAR_DEPT_ID, deptId);
         vars.put(VAR_DEPT_NAME, deptName == null ? deptId : deptName);
         vars.put(VAR_COMM_TYPE, COMM_TYPE_DEPT);
         vars.put(VAR_COMM_RECORD_ID, commRecordId);
+        vars.put(VAR_COMMUNICATE_ID, commRecordId);
         vars.put(VAR_SESSION_ID, sessionId);
         vars.put(VAR_ROOT_TASK_ID, rootTask.getId());
         vars.put(VAR_SOURCE_TASK_ID, rootTask.getId());
         vars.put(VAR_SOURCE_TASK_DEF_KEY, rootTask.getTaskDefinitionKey());
         vars.put(VAR_CONTENT, content);
+        vars.put(VAR_ORIGIN_CONTENT, content);
+        vars.put(VAR_SUB_PROCESS_KEY, key);
         vars.put(VAR_INITIATOR, initiator);
         // 待办中心等列表读的是 applicant，两处都要写：
         // 只写 initiator 会出现「流程实例列表有发起人、待办中心这一列却是空」。
@@ -127,7 +164,7 @@ public class DeptCommProcessService {
         // 主流程实例ID：既是审计信息，也是主流程结束时级联终止的唯一索引
         vars.put(VAR_PARENT_PROC_INST_ID, rootTask.getProcessInstanceId());
 
-        ProcessInstance pi = startWithInitiator(commRecordId, vars, initiator);
+        ProcessInstance pi = startWithInitiator(commRecordId, key, vars, initiator);
         String taskId = currentTaskId(pi.getId());
         if (taskId == null) {
             // 在 Camunda 命令内启动（首轮/再发起都是在命令里建单）时，新任务还没 flush 到库，
@@ -152,14 +189,15 @@ public class DeptCommProcessService {
      * <p>建单是在命令内完成的（首轮 / 追问 / 再发起都如此），此时 {@code setAuthenticatedUserId}
      * 复用当前命令上下文，立即对紧接着的启动生效；命令外调用时则显式清理，避免污染线程池线程。</p>
      */
-    private ProcessInstance startWithInitiator(String businessKey, Map<String, Object> vars, String initiator) {
+    private ProcessInstance startWithInitiator(String businessKey, String processKey,
+                                               Map<String, Object> vars, String initiator) {
         if (initiator == null || initiator.isEmpty()) {
-            return runtimeService.startProcessInstanceByKey(PROCESS_KEY, businessKey, vars);
+            return runtimeService.startProcessInstanceByKey(processKey, businessKey, vars);
         }
         CommandContext commandContext = Context.getCommandContext();
         identityService.setAuthenticatedUserId(initiator);
         try {
-            return runtimeService.startProcessInstanceByKey(PROCESS_KEY, businessKey, vars);
+            return runtimeService.startProcessInstanceByKey(processKey, businessKey, vars);
         } finally {
             // 命令内设置会随命令上下文一起销毁，正是我们要的；
             // 命令外调用才需要清理，否则线程池里的下一个请求会带着别人的身份。
@@ -194,7 +232,7 @@ public class DeptCommProcessService {
         return null;
     }
 
-    /** 子流程当前待处理的部门任务ID；流程已结束或查不到时返回 null */
+    /** 子流程当前待处理的任务ID；流程已结束或查不到时返回 null */
     public String currentTaskId(String processInstanceId) {
         if (processInstanceId == null) {
             return null;
@@ -203,7 +241,15 @@ public class DeptCommProcessService {
                 .processInstanceId(processInstanceId)
                 .taskDefinitionKey(TASK_KEY)
                 .singleResult();
-        return task == null ? null : task.getId();
+        if (task != null) {
+            return task.getId();
+        }
+        // 三节点通用流程/专属流程的当前节点不叫 dept_handle，
+        // 这里按实例兜底取任意活动任务（子流程同时只会有一个活动节点）。
+        Task any = taskService.createTaskQuery()
+                .processInstanceId(processInstanceId)
+                .singleResult();
+        return any == null ? null : any.getId();
     }
 
     /** 按沟通记录上登记的任务ID 取部门任务；任务已被处理时返回 null */
@@ -216,9 +262,16 @@ public class DeptCommProcessService {
         if (deptProcInstId == null) {
             return null;
         }
-        return taskService.createTaskQuery()
+        Task deptTask = taskService.createTaskQuery()
                 .processInstanceId(deptProcInstId)
                 .taskDefinitionKey(TASK_KEY)
+                .singleResult();
+        if (deptTask != null) {
+            return deptTask;
+        }
+        // 新子流程的节点随流程不同而不同，按实例取任意活动任务
+        return taskService.createTaskQuery()
+                .processInstanceId(deptProcInstId)
                 .singleResult();
     }
 
@@ -250,7 +303,6 @@ public class DeptCommProcessService {
             return 0;
         }
         List<ProcessInstance> children = runtimeService.createProcessInstanceQuery()
-                .processDefinitionKey(PROCESS_KEY)
                 .variableValueEquals(VAR_PARENT_PROC_INST_ID, parentProcessInstanceId)
                 .list();
         if (children.isEmpty()) {
@@ -264,6 +316,10 @@ public class DeptCommProcessService {
         int cancelled = 0;
         java.util.Date now = new java.util.Date();
         for (ProcessInstance pi : children) {
+            // 同一个父流程下可能还挂着别的业务子流程，这里只处理部门沟通
+            if (!isDeptProcessDefinition(pi.getProcessDefinitionId())) {
+                continue;
+            }
             Object recordId = runtimeService.getVariable(pi.getId(), VAR_COMM_RECORD_ID);
             if (taskMgr != null && recordId != null) {
                 BizCommTask record = taskMgr.findById(String.valueOf(recordId));
@@ -343,7 +399,17 @@ public class DeptCommProcessService {
         }
         ProcessDefinition pd = repositoryService.createProcessDefinitionQuery()
                 .processDefinitionId(processDefinitionId).singleResult();
-        return pd != null && PROCESS_KEY.equals(pd.getKey());
+        if (pd == null) {
+            return false;
+        }
+        // 旧版单节点流程 + 注册表登记的全部部门子流程都算
+        return PROCESS_KEY.equals(pd.getKey())
+                || subProcessDefService.isDeptSubProcessKey(pd.getKey());
+    }
+
+    /** 任务是否属于任一部门沟通子流程（待办中心识别用） */
+    public boolean isDeptSubProcessTask(Task task) {
+        return task != null && isDeptProcessDefinition(task.getProcessDefinitionId());
     }
 
     /** 部门必须存在且至少有一名成员，否则候选组永远没人能认领 */

@@ -93,6 +93,26 @@ public class DeptCommReplyListener implements TaskListener {
         });
     }
 
+    /**
+     * 供其它子流程的结束监听器复用：在当前命令内把部门意见回写到沟通记录。
+     *
+     * <p>三节点通用流程、法务/财务专属流程的结束事件都调这里，
+     * 保证「回写字段 + 解锁条件」只有一份实现。</p>
+     */
+    public void writeBack(CommandContext commandContext, String recordId, String handler, String replyText) {
+        apply(commandContext, recordId, handler, replyText == null ? "" : replyText.trim());
+    }
+
+    /** 命令外兜底：另开一个命令执行回写 */
+    public void writeBackOutsideCommand(String recordId, String handler, String replyText) {
+        ProcessEngineConfigurationImpl config =
+                (ProcessEngineConfigurationImpl) processEngine.getProcessEngineConfiguration();
+        config.getCommandExecutorTxRequired().execute((Command<Void>) ctx -> {
+            apply(ctx, recordId, handler, replyText == null ? "" : replyText.trim());
+            return null;
+        });
+    }
+
     private void apply(CommandContext commandContext, String recordId, String handler, String replyText) {
         BizCommTaskManager taskMgr = commandContext.getSession(BizCommTaskManager.class);
         BizCommSessionManager sessionMgr = commandContext.getSession(BizCommSessionManager.class);

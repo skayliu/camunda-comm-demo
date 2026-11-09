@@ -246,10 +246,16 @@ final class CommChainRules {
             String targetName = firstNonBlank(raw.get("displayName"), raw.get("targetName"),
                     raw.get("value"), raw.get("name"), targetId);
 
-            Map<String, String> normalized = new HashMap<>(4);
+            Map<String, String> normalized = new HashMap<>(6);
             normalized.put("type", type);
             normalized.put("id", targetId);
             normalized.put("name", targetName);
+            // 部门沟通可指定注册表里的子流程 key（通用/部门专属）；
+            // 人员沟通忽略这个字段，带上来也无害。
+            String subProcessKey = firstNonBlank(raw.get("subProcessKey"), raw.get("processKey"));
+            if (subProcessKey != null) {
+                normalized.put("subProcessKey", subProcessKey);
+            }
             result.add(normalized);
         }
         return result;

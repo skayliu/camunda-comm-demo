@@ -301,6 +301,33 @@ export const commApi = {
   /** 可选沟通部门：部门沟通走独立子流程，前端据此以 type=DEPT 提交 */
   departments(keyword) {
     return http.get('/comm/departments', { params: { keyword } })
+  },
+  /** 某部门可选的沟通子流程（通用三节点 + 部门专属） */
+  subprocesses(deptId) {
+    return http.get('/comm/subprocesses', { params: { deptId } })
+  }
+}
+
+/** 部门沟通子流程的待办办理 */
+export const deptSubApi = {
+  detail(taskId) {
+    return http.get(`/comm/dept-sub/${taskId}`)
+  },
+  /** 文书分发：选本部门经办人与意见规则 */
+  dispatch(taskId, payload) {
+    return http.post(`/comm/dept-sub/${taskId}/dispatch`, payload)
+  },
+  /** 通用流程：经办人提交意见 */
+  opinion(taskId, payload) {
+    return http.post(`/comm/dept-sub/${taskId}/opinion`, payload)
+  },
+  /** 专属流程：中间岗位节点提交意见 */
+  nodeOpinion(taskId, payload) {
+    return http.post(`/comm/dept-sub/${taskId}/node-opinion`, payload)
+  },
+  /** 汇总节点：提交 / 退回补充 / 重新分发 */
+  summary(taskId, payload) {
+    return http.post(`/comm/dept-sub/${taskId}/summary`, payload)
   }
 }
 

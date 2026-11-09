@@ -30,18 +30,18 @@ class MigrationScriptTest {
                 .load()
                 .migrate();
 
-        assertThat(result.migrationsExecuted).isEqualTo(4);
+        assertThat(result.migrationsExecuted).isEqualTo(5);
 
         try (Connection conn = DriverManager.getConnection(URL, "sa", "");
              Statement st = conn.createStatement()) {
 
             assertThat(count(st, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES "
                     + "WHERE TABLE_SCHEMA = 'PUBLIC' AND TABLE_NAME LIKE 'BIZ!_%' ESCAPE '!'"))
-                    .as("6 张业务表").isEqualTo(6);
+                    .as("7 张业务表（V5 新增部门子流程注册表）").isEqualTo(7);
 
             assertThat(count(st, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.INDEXES "
                     + "WHERE INDEX_SCHEMA = 'PUBLIC' AND INDEX_NAME LIKE 'IDX!_%' ESCAPE '!'"))
-                    .as("V2 的 16 个 + V3 的 4 个索引").isEqualTo(20);
+                    .as("V2 的 16 个 + V3 的 4 个 + V5 的 1 个索引").isEqualTo(21);
 
             // 组合索引的列序不可调换：findByTargetAndStatus 依赖 (TARGET_ID_, STATUS_)
             assertThat(count(st, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.INDEXES "

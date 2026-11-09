@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  id="Definitions_DeptCommGeneral"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+
+    <!--
+      通用部门沟通子流程（文书中枢三节点）。
+
+      统一契约（所有部门子流程都必须遵守，主流程只认这些）：
+        入参：sourceProcInstId / sourceTaskId / commRecordId / deptId / originContent
+        出参：finalOpinion
+        结束：endEvent 上的 deptSubProcessEndListener 负责解锁主待办、回写沟通记录
+
+      人员分配：
+        文书 = ${clerkUserId}，启动时由 SubProcessDefService 解析（部门 <deptId>_clerk 组优先）
+        经办人 = 文书在分发节点动态选择，多实例按 handlerUserIds 展开
+    -->
+    <bpmn:process id="dept_comm_general" name="通用部门沟通子流程" isExecutable="true"
+                  camunda:historyTimeToLive="180">
+        <bpmn:documentation>文书收文分发 → 经办人填写意见 → 文书汇总反馈。适用于大多数普通部门。</bpmn:documentation>
+
+        <bpmn:startEvent id="general_start" name="启动部门沟通">
+            <bpmn:extensionElements>
+                <camunda:executionListener event="start" delegateExpression="${deptSubProcessStartListener}"/>
+            </bpmn:extensionElements>
+            <bpmn:outgoing>flow_general_start_dispatch</bpmn:outgoing>
+        </bpmn:startEvent>
+
+        <!-- 节点1：文书收文分发（选经办人 + 意见规则） -->
+        <bpmn:userTask id="Task_ClerkDispatch" name="部门文书收文分发"
+                       camunda:assignee="${clerkUserId}">
+            <bpmn:documentation>文书选择本部门经办人并指定意见规则；提交后生成多实例经办待办。</bpmn:documentation>
+            <bpmn:extensionElements>
+                <camunda:taskListener event="complete" delegateExpression="${deptCommDispatchListener}"/>
+                <camunda:formData>
+                    <camunda:formField id="handlerUserIds" label="选择经办人" type="string" required="true"/>
+                    <camunda:formField id="opinionRule" label="意见规则" type="enum" required="true">
+                        <camunda:value id="ALL" name="需全部经办人反馈"/>
+                        <camunda:value id="ANY" name="任一经办人反馈即可"/>
+                    </camunda:formField>
+                    <camunda:formField id="remark" label="分发说明" type="string"/>
+                </camunda:formData>
+            </bpmn:extensionElements>
+            <bpmn:incoming>flow_general_start_dispatch</bpmn:incoming>
+            <bpmn:incoming>flow_general_handler_back</bpmn:incoming>
+            <bpmn:incoming>flow_general_summary_redispatch</bpmn:incoming>
+            <bpmn:outgoing>flow_general_dispatch_handler</bpmn:outgoing>
+        </bpmn:userTask>
+
+        <!-- 节点2：经办人填写意见（并行多实例） -->
+        <bpmn:userTask id="Task_HandlerOpinion" name="经办人填写意见"
+                       camunda:assignee="${handlerUserId}">
+            <bpmn:documentation>每个经办人一张待办；意见写入 opinionMap，供文书汇总参考。</bpmn:documentation>
+            <bpmn:extensionElements>
+                <camunda:taskListener event="complete" delegateExpression="${deptCommHandlerListener}"/>
+                <camunda:formData>
+                    <camunda:formField id="opinionContent" label="意见内容" type="string" required="true"/>
+                    <camunda:formField id="attachments" label="附件地址" type="string"/>
+                    <camunda:formField id="returnToClerk" label="退回文书重新分发" type="boolean" defaultValue="false"/>
+                </camunda:formData>
+            </bpmn:extensionElements>
+            <bpmn:incoming>flow_general_dispatch_handler</bpmn:incoming>
+            <bpmn:incoming>flow_general_summary_supplement</bpmn:incoming>
+            <bpmn:outgoing>flow_general_handler_gateway</bpmn:outgoing>
+            <bpmn:multiInstanceLoopCharacteristics isSequential="false"
+                                                  camunda:collection="${handlerUserIds}"
+                                                  camunda:elementVariable="handlerUserId">
+                <bpmn:completionCondition xsi:type="bpmn:tFormalExpression">${(opinionRule == 'ANY' &amp;&amp; nrOfCompletedInstances &gt;= 1) || (opinionRule != 'ANY' &amp;&amp; nrOfCompletedInstances == nrOfInstances)}</bpmn:completionCondition>
+            </bpmn:multiInstanceLoopCharacteristics>
+        </bpmn:userTask>
+
+        <bpmn:exclusiveGateway id="Gateway_HandlerCheck" name="经办人是否退回">
+            <bpmn:incoming>flow_general_handler_gateway</bpmn:incoming>
+            <bpmn:outgoing>flow_general_handler_back</bpmn:outgoing>
+            <bpmn:outgoing>flow_general_handler_summary</bpmn:outgoing>
+        </bpmn:exclusiveGateway>
+
+        <!-- 节点3：文书汇总反馈 -->
+        <bpmn:userTask id="Task_ClerkSummary" name="部门文书汇总反馈"
+                       camunda:assignee="${clerkUserId}">
+            <bpmn:documentation>汇总经办意见形成部门正式口径 finalOpinion；可提交、退回补充或重新分发。</bpmn:documentation>
+            <bpmn:extensionElements>
+                <camunda:taskListener event="complete" delegateExpression="${deptCommSummaryListener}"/>
+                <camunda:formData>
+                    <camunda:formField id="finalOpinion" label="部门最终汇总意见" type="string" required="true"/>
+                    <camunda:formField id="actionType" label="操作类型" type="enum" required="true">
+                        <camunda:value id="SUBMIT" name="提交部门意见"/>
+                        <camunda:value id="RETURN_SUPPLEMENT" name="退回经办人补充"/>
+                        <camunda:value id="REDISPATCH" name="重新分发"/>
+                    </camunda:formField>
+                    <camunda:formField id="returnHandlerIds" label="需补充意见的经办人" type="string"/>
+                </camunda:formData>
+            </bpmn:extensionElements>
+            <bpmn:incoming>flow_general_handler_summary</bpmn:incoming>
+            <bpmn:outgoing>flow_general_summary_gateway</bpmn:outgoing>
+        </bpmn:userTask>
+
+        <bpmn:exclusiveGateway id="Gateway_SummaryCheck" name="汇总后处理">
+            <bpmn:incoming>flow_general_summary_gateway</bpmn:incoming>
+            <bpmn:outgoing>flow_general_summary_supplement</bpmn:outgoing>
+            <bpmn:outgoing>flow_general_summary_redispatch</bpmn:outgoing>
+            <bpmn:outgoing>flow_general_summary_end</bpmn:outgoing>
+        </bpmn:exclusiveGateway>
+
+        <bpmn:endEvent id="general_end" name="部门沟通完成">
+            <bpmn:extensionElements>
+                <camunda:executionListener event="end" delegateExpression="${deptSubProcessEndListener}"/>
+            </bpmn:extensionElements>
+            <bpmn:incoming>flow_general_summary_end</bpmn:incoming>
+        </bpmn:endEvent>
+
+        <bpmn:sequenceFlow id="flow_general_start_dispatch" sourceRef="general_start" targetRef="Task_ClerkDispatch"/>
+        <bpmn:sequenceFlow id="flow_general_dispatch_handler" sourceRef="Task_ClerkDispatch" targetRef="Task_HandlerOpinion"/>
+        <bpmn:sequenceFlow id="flow_general_handler_gateway" sourceRef="Task_HandlerOpinion" targetRef="Gateway_HandlerCheck"/>
+
+        <bpmn:sequenceFlow id="flow_general_handler_back" name="退回重新分发"
+                           sourceRef="Gateway_HandlerCheck" targetRef="Task_ClerkDispatch">
+            <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${returnToClerk == true}</bpmn:conditionExpression>
+        </bpmn:sequenceFlow>
+        <bpmn:sequenceFlow id="flow_general_handler_summary" name="正常提交"
+                           sourceRef="Gateway_HandlerCheck" targetRef="Task_ClerkSummary">
+            <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${returnToClerk != true}</bpmn:conditionExpression>
+        </bpmn:sequenceFlow>
+
+        <bpmn:sequenceFlow id="flow_general_summary_gateway" sourceRef="Task_ClerkSummary" targetRef="Gateway_SummaryCheck"/>
+        <bpmn:sequenceFlow id="flow_general_summary_supplement" name="退回经办人补充"
+                           sourceRef="Gateway_SummaryCheck" targetRef="Task_HandlerOpinion">
+            <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${actionType == 'RETURN_SUPPLEMENT'}</bpmn:conditionExpression>
+        </bpmn:sequenceFlow>
+        <bpmn:sequenceFlow id="flow_general_summary_redispatch" name="重新分发"
+                           sourceRef="Gateway_SummaryCheck" targetRef="Task_ClerkDispatch">
+            <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${actionType == 'REDISPATCH'}</bpmn:conditionExpression>
+        </bpmn:sequenceFlow>
+        <bpmn:sequenceFlow id="flow_general_summary_end" name="提交最终意见"
+                           sourceRef="Gateway_SummaryCheck" targetRef="general_end">
+            <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${actionType == null || actionType == 'SUBMIT'}</bpmn:conditionExpression>
+        </bpmn:sequenceFlow>
+    </bpmn:process>
+
+    <bpmndi:BPMNDiagram id="BPMNDiagram_General">
+        <bpmndi:BPMNPlane id="BPMNPlane_General" bpmnElement="dept_comm_general">
+            <bpmndi:BPMNShape id="Shape_general_start" bpmnElement="general_start">
+                <dc:Bounds x="60" y="142" width="36" height="36"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_general_dispatch" bpmnElement="Task_ClerkDispatch">
+                <dc:Bounds x="150" y="120" width="120" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_general_handler" bpmnElement="Task_HandlerOpinion">
+                <dc:Bounds x="330" y="120" width="120" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_general_gateway_handler" bpmnElement="Gateway_HandlerCheck" isMarkerVisible="true">
+                <dc:Bounds x="500" y="135" width="50" height="50"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_general_summary" bpmnElement="Task_ClerkSummary">
+                <dc:Bounds x="600" y="120" width="120" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_general_gateway_summary" bpmnElement="Gateway_SummaryCheck" isMarkerVisible="true">
+                <dc:Bounds x="770" y="135" width="50" height="50"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_general_end" bpmnElement="general_end">
+                <dc:Bounds x="880" y="142" width="36" height="36"/>
+            </bpmndi:BPMNShape>
+
+            <bpmndi:BPMNEdge id="Edge_general_start_dispatch" bpmnElement="flow_general_start_dispatch">
+                <di:waypoint x="96" y="160"/>
+                <di:waypoint x="150" y="160"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Edge_general_dispatch_handler" bpmnElement="flow_general_dispatch_handler">
+                <di:waypoint x="270" y="160"/>
+                <di:waypoint x="330" y="160"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Edge_general_handler_gateway" bpmnElement="flow_general_handler_gateway">
+                <di:waypoint x="450" y="160"/>
+                <di:waypoint x="500" y="160"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Edge_general_handler_summary" bpmnElement="flow_general_handler_summary">
+                <di:waypoint x="550" y="160"/>
+                <di:waypoint x="600" y="160"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Edge_general_summary_gateway" bpmnElement="flow_general_summary_gateway">
+                <di:waypoint x="720" y="160"/>
+                <di:waypoint x="770" y="160"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Edge_general_summary_end" bpmnElement="flow_general_summary_end">
+                <di:waypoint x="820" y="160"/>
+                <di:waypoint x="880" y="160"/>
+            </bpmndi:BPMNEdge>
+        </bpmndi:BPMNPlane>
+    </bpmndi:BPMNDiagram>
+</bpmn:definitions>

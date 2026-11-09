@@ -238,9 +238,13 @@ public class CommTaskFactory {
             // 该 id 已处于 TRANSIENT，再 merge 直接抛
             // ENGINE-03002 Cannot add MERGED entity ... already in state 'TRANSIENT'，
             // 表现为发起部门沟通直接 500。
+            //
+            // subProcessKey 来自注册表：通用三节点流程或该部门的专属流程。
+            // 为空时由 DeptCommProcessService 回退到旧的单节点流程，兼容历史调用方。
+            String subProcessKey = target.get("subProcessKey");
             DeptCommProcessService.Started started = deptCommProcessService.start(
                     ct.getId(), sessionId, rootTask, targetId, targetName, content,
-                    rootTask.getAssignee(), 1);
+                    rootTask.getAssignee(), 1, subProcessKey);
             // 子流程实例ID 与部门任务ID 各归各位：前者用于收回时结束整个子流程，
             // 后者用于待办中心按 taskId 反查这条沟通记录
             ct.setDeptProcInstId(started.getProcessInstanceId());
@@ -470,6 +474,13 @@ public class CommTaskFactory {
                             .taskDefinitionKey(DeptCommProcessService.TASK_KEY)
                             .singleResult();
                     if (deptTask == null) {
+                        // 三节点通用流程/专属流程的当前节点不叫 dept_handle：
+                        // 按实例兜底取任意活动任务，否则新流程的 CAMUNDA_TASK_ID_ 永远为空。
+                        deptTask = taskService.createTaskQuery()
+                                .processInstanceId(procInstId)
+                                .singleResult();
+                    }
+                    if (deptTask == null) {
                         // 子流程刚启动就被收回/终止时，任务已不存在，无需回填
                         log.warn("部门沟通任务ID 回填跳过：record={}, pid={} 下没有待处理的部门任务",
                                 recordId, procInstId);
@@ -536,7 +547,7 @@ public class CommTaskFactory {
             if (BizCommTask.TARGET_DEPT.equals(t.get("type"))) {
                 DeptCommProcessService.Started started = deptCommProcessService.start(
                         newRecordId, parent.getSessionId(), rootTask, t.get("id"), t.get("name"), content,
-                        operator, round);
+                        operator, round, t.get("subProcessKey"));
                 ct.setDeptProcInstId(started.getProcessInstanceId());
                 ct.setCamundaTaskId(started.getTaskId());
                 taskMgr.insert(ct);

@@ -65,6 +65,12 @@ public class WorkbenchService {
     private CommunicationService communicationService;
 
     @Autowired
+    private DeptCommProcessService deptCommProcessService;
+
+    @Autowired
+    private DeptSubTaskService deptSubTaskService;
+
+    @Autowired
     private TaskTransferService taskTransferService;
 
     @Autowired
@@ -121,11 +127,14 @@ public class WorkbenchService {
         }
         List<Task> candidateDeptTasks = taskService.createTaskQuery()
                 .taskCandidateUser(userId)
-                .taskDefinitionKey(BizCommTask.DEPT_TASK_KEY)
                 .orderByTaskCreateTime().desc()
                 .list();
         for (Task t : candidateDeptTasks) {
-            merged.putIfAbsent(t.getId(), t);
+            // 只收部门沟通子流程的候选任务：通用流程的文书分发/经办、专属流程的岗位节点
+            // 都不是 dept_handle，只按单一 key 查会把它们全部漏掉。
+            if (deptCommProcessService.isDeptSubProcessTask(t)) {
+                merged.putIfAbsent(t.getId(), t);
+            }
         }
         tasks = new ArrayList<>(merged.values());
         tasks.sort((a, b) -> {
@@ -144,9 +153,14 @@ public class WorkbenchService {
                 .atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
         List<Map<String, Object>> filtered = new ArrayList<>();
         for (Task t : tasks) {
-            boolean isComm = BizCommTask.isCommTaskKey(t.getTaskDefinitionKey());
-            // 每个任务只解析一次沟通记录：既用于统计/筛选，也复用到 VO 组装
-            BizCommTask record = isComm ? communicationService.getCommRecordByCamundaTaskId(t.getId()) : null;
+            boolean isDeptSub = deptCommProcessService.isDeptSubProcessTask(t);
+            boolean isComm = isDeptSub || BizCommTask.isCommTaskKey(t.getTaskDefinitionKey());
+            // 每个任务只解析一次沟通记录：既用于统计/筛选，也复用到 VO 组装。
+            // 部门子流程的中间节点任务ID 不在业务表里，按子流程实例ID 反查（DEPT_PROC_INST_ID_）。
+            BizCommTask record = isComm
+                    ? communicationService.getCommRecordByCamundaTaskId(
+                        isDeptSub ? t.getProcessInstanceId() : t.getId())
+                    : null;
             boolean isFollowUp = record != null && record.getParentCommTaskId() != null;
             if (isComm) {
                 commCount++;
@@ -169,6 +183,10 @@ public class WorkbenchService {
                 continue;
             }
             Map<String, Object> vo = toTodoVO(t, isComm, record);
+            if (isDeptSub) {
+                vo.put("isDeptSubTask", true);
+                vo.put("deptNodeType", deptSubTaskService.nodeType(t));
+            }
             if (!kw.isEmpty() && !matches(vo, kw)) {
                 continue;
             }
@@ -225,8 +243,11 @@ public class WorkbenchService {
         if (task == null) {
             throw new BusinessException("任务不存在或已被处理");
         }
-        boolean isComm = BizCommTask.isCommTaskKey(task.getTaskDefinitionKey());
+        boolean isDeptSub = deptCommProcessService.isDeptSubProcessTask(task);
+        boolean isComm = isDeptSub || BizCommTask.isCommTaskKey(task.getTaskDefinitionKey());
         Map<String, Object> vo = toTodoVO(task, isComm);
+        vo.put("isDeptSubTask", isDeptSub);
+        vo.put("deptNodeType", isDeptSub ? deptSubTaskService.nodeType(task) : null);
         vo.put("variables", safeVariables(task.getProcessInstanceId()));
         Map<String, Object> commStatus = communicationService.getTaskCommStatus(
                 isComm ? resolveRootTaskId(task) : taskId, userId);
@@ -269,7 +290,8 @@ public class WorkbenchService {
 
         // 沟通待办：把同一会话内其他对象的反馈进度一并返回，前端可直接还原上下文
         if (isComm) {
-            BizCommTask self = communicationService.getCommRecordByCamundaTaskId(taskId);
+            BizCommTask self = communicationService.getCommRecordByCamundaTaskId(
+                    isDeptSub ? task.getProcessInstanceId() : taskId);
             if (self != null) {
                 vo.put("commRecordId", self.getId());
                 vo.put("sessionId", self.getSessionId());
@@ -390,7 +412,8 @@ public class WorkbenchService {
             vo.put("taskId", t.getId());
             vo.put("taskName", t.getName());
             vo.put("taskDefKey", t.getTaskDefinitionKey());
-            boolean isComm = BizCommTask.isCommTaskKey(t.getTaskDefinitionKey());
+            boolean isComm = BizCommTask.isCommTaskKey(t.getTaskDefinitionKey())
+                    || deptCommProcessService.isDeptProcessDefinition(t.getProcessDefinitionId());
             vo.put("isCommTask", isComm);
             vo.put("isFollowUp", isComm && isFollowUpCommTask(t.getId()));
             vo.put("processInstanceId", t.getProcessInstanceId());
@@ -487,7 +510,8 @@ public class WorkbenchService {
             m.put("taskId", t.getId());
             m.put("taskName", t.getName());
             m.put("assignee", t.getAssignee());
-            boolean isComm = BizCommTask.isCommTaskKey(t.getTaskDefinitionKey());
+            boolean isComm = BizCommTask.isCommTaskKey(t.getTaskDefinitionKey())
+                    || deptCommProcessService.isDeptProcessDefinition(t.getProcessDefinitionId());
             m.put("isCommTask", isComm);
             m.put("isFollowUp", isComm && isFollowUpCommTask(t.getId()));
             result.add(m);
