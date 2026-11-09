@@ -1,5 +1,6 @@
 package com.example.camundademo.controller;
 
+import com.example.camundademo.security.AdminAccess;
 import com.example.camundademo.security.CurrentUser;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -53,13 +54,16 @@ public class AuthController {
     private final IdentityService identityService;
     private final SecurityContextRepository securityContextRepository;
     private final SessionRegistry sessionRegistry;
+    private final AdminAccess adminAccess;
 
     public AuthController(IdentityService identityService,
                           SecurityContextRepository securityContextRepository,
-                          SessionRegistry sessionRegistry) {
+                          SessionRegistry sessionRegistry,
+                          AdminAccess adminAccess) {
         this.identityService = identityService;
         this.securityContextRepository = securityContextRepository;
         this.sessionRegistry = sessionRegistry;
+        this.adminAccess = adminAccess;
     }
 
     /**
@@ -113,6 +117,9 @@ public class AuthController {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("userId", userId);
         result.put("displayName", displayNameOf(userId));
+        // 前端据此决定是否显示「部门沟通流程登记」菜单；接口侧仍会独立校验，
+        // 这里的值只用于少发一次必然 403 的请求
+        result.put("camundaAdmin", adminAccess.isAdmin(userId));
         return ResponseEntity.ok(result);
     }
 
@@ -175,6 +182,7 @@ public class AuthController {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("userId", userId);
         result.put("displayName", displayNameOf(userId));
+        result.put("camundaAdmin", adminAccess.isAdmin(userId));
         return result;
     }
 

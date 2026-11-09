@@ -1,5 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { ensureAuth, isLoggedIn } from '../api'
+import { ensureAuth, isCamundaAdmin, isLoggedIn } from '../api'
 
 const routes = [
   {
@@ -42,6 +42,14 @@ const routes = [
         name: 'delegation',
         component: () => import('../views/DelegationList.vue'),
         meta: { title: '委托记录' }
+      },
+      {
+        // 控制台管理功能：只对 camunda-admin 开放。
+        // 前端守卫只是减少误入，接口侧 /api/admin/** 每个方法都会再校验一次。
+        path: 'subprocess-defs',
+        name: 'subprocess-defs',
+        component: () => import('../views/SubProcessDefs.vue'),
+        meta: { title: '部门沟通流程登记', adminOnly: true }
       }
     ]
   },
@@ -72,6 +80,11 @@ router.beforeEach(async (to) => {
   const loggedIn = await ensureAuth()
   if (!loggedIn) {
     return { name: 'login', query: { redirect: to.fullPath } }
+  }
+  // 管理页需要 camunda-admin：ensureAuth 已把成员身份取回内存。
+  // 非管理员直接送回待办，不展示一个点进去必然 403 的页面。
+  if (to.meta.adminOnly && !isCamundaAdmin()) {
+    return { name: 'todo' }
   }
   return true
 })

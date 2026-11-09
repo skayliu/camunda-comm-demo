@@ -12,6 +12,9 @@
     "build:pure": "vite build && node scripts/sync-target.mjs",
     "verify": "node scripts/verify.mjs",
     "verify:smoke": "node scripts/verify.mjs --smoke",
+    "verify:pin": "node scripts/verify-pin-modes.mjs",
+    "verify:select": "node scripts/verify-select-style.mjs",
+    "verify:link": "node scripts/verify-flow-link.mjs",
     "smoke": "node scripts/e2e-smoke.mjs",
     "preview": "vite preview"
   },
@@ -19,6 +22,8 @@
     "@ant-design/icons-vue": "^7.0.1",
     "ant-design-vue": "^4.2.6",
     "axios": "^1.7.9",
+    "bpmn-js": "^17.11.1",
+    "camunda-bpmn-moddle": "^8.0.2",
     "dayjs": "^1.11.13",
     "vue": "^3.5.13",
     "vue-router": "^4.5.0"

@@ -80,6 +80,8 @@ public class CommProcessEnginePlugin extends AbstractProcessEnginePlugin {
             config.setCustomPostCommandInterceptorsTxRequired(postInterceptors);
         }
         postInterceptors.add(new CommunicationCommandInterceptor());
+        // 部署后自动登记部门子流程：只收集 deploymentId，真正写表在事务提交之后
+        postInterceptors.add(new DeploymentRegistryInterceptor());
     }
 
     @Override

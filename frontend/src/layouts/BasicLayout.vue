@@ -53,6 +53,11 @@
           <template #icon><UserSwitchOutlined /></template>
           <span class="menu-label">代理设置</span>
         </a-menu-item>
+        <a-menu-divider v-if="isAdmin" />
+        <a-menu-item v-if="isAdmin" key="subprocess-defs">
+          <template #icon><ApartmentOutlined /></template>
+          <span class="menu-label">部门沟通流程登记</span>
+        </a-menu-item>
       </a-menu>
     </a-layout-sider>
 
@@ -111,6 +116,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  ApartmentOutlined,
   CheckCircleOutlined,
   InboxOutlined,
   LogoutOutlined,
@@ -122,7 +128,7 @@ import {
   UserOutlined,
   UserSwitchOutlined
 } from '@ant-design/icons-vue'
-import { authApi, getUser, logout, wbApi } from '../api'
+import { authApi, getUser, isCamundaAdmin, logout, wbApi } from '../api'
 
 const route = useRoute()
 const router = useRouter()
@@ -134,6 +140,8 @@ const todoCount = ref(0)
 const delegatingCount = ref(0)
 const displayName = ref('')
 const user = ref(getUser())
+// 控制台菜单的可见性：来自 /auth/me 的 camundaAdmin，接口侧仍会独立校验
+const isAdmin = ref(isCamundaAdmin())
 
 const activeKey = computed(() => route.name)
 const currentTitle = computed(() => (route.meta && route.meta.title) || '待办中心')
@@ -178,6 +186,8 @@ onMounted(async () => {
   try {
     const me = await authApi.me()
     displayName.value = me.displayName
+    // 刷新后内存态丢失，这里按服务端结果重新设置，避免管理员刷新就看不见菜单
+    isAdmin.value = !!me.camundaAdmin
   } catch (e) {
     // 401 已由拦截器处理
   }

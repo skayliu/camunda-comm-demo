@@ -13,6 +13,8 @@ try {
 
 // 登录态只放在内存里：会话是否有效由服务端回答，前端不再自己编一个标记
 let currentUser = ''
+// 是否为 camunda-admin：只用于决定菜单/路由是否显示，接口侧会独立校验
+let currentAdmin = false
 let authChecked = null
 
 // ===== CSRF =====
@@ -126,10 +128,12 @@ export function ensureAuth() {
       .get('/auth/me')
       .then((me) => {
         currentUser = me.userId
+        currentAdmin = !!me.camundaAdmin
         return true
       })
       .catch(() => {
         currentUser = ''
+        currentAdmin = false
         authChecked = null
         return false
       })
@@ -145,6 +149,11 @@ export function getUser() {
   return currentUser
 }
 
+/** 当前用户是否属于 camunda-admin（控制台管理功能的可见性依据） */
+export function isCamundaAdmin() {
+  return currentAdmin
+}
+
 export async function logout() {
   try {
     await http.post('/auth/logout')
@@ -152,6 +161,7 @@ export async function logout() {
     // 会话可能已过期，退出本身应当幂等，继续清本地状态
   }
   currentUser = ''
+  currentAdmin = false
   authChecked = null
   // 令牌本身留在 cookie 里（服务端也没清），内存这份丢掉即可，
   // 下次登录前 ensureCsrf 会重新取
@@ -180,6 +190,7 @@ export const authApi = {
   async login(user, password) {
     const me = await http.post('/auth/login', { userId: user, password })
     currentUser = me.userId
+    currentAdmin = !!me.camundaAdmin
     authChecked = Promise.resolve(true)
     return me
   },
@@ -305,6 +316,46 @@ export const commApi = {
   /** 某部门可选的沟通子流程（通用三节点 + 部门专属） */
   subprocesses(deptId) {
     return http.get('/comm/subprocesses', { params: { deptId } })
+  }
+}
+
+/**
+ * 控制台 · 部门子流程注册表维护（仅 camunda-admin）。
+ *
+ * 服务端每个接口都会独立校验组归属，这里的调用不会因为前端藏了入口而变成"安全"，
+ * 但能让非管理员少看到一次 403。
+ */
+export const adminSubProcessApi = {
+  /** 全部登记记录（含停用），附带引擎版本与部署状态 */
+  list(keyword) {
+    return http.get('/admin/subprocess-defs', { params: { keyword } })
+  },
+  /** 归属部门候选（DEPARTMENT 类型的组 + 成员数） */
+  departments(keyword) {
+    return http.get('/admin/subprocess-defs/departments', { params: { keyword } })
+  },
+  /** id 为空新增，否则更新 */
+  save(payload) {
+    return http.post('/admin/subprocess-defs', payload)
+  },
+  setStatus(id, status) {
+    return http.post(`/admin/subprocess-defs/${id}/status`, { status })
+  },
+  remove(id) {
+    return http.delete(`/admin/subprocess-defs/${id}`)
+  },
+  /** 从引擎全量对齐一次（部署钩子漏掉时的兜底） */
+  sync() {
+    return http.post('/admin/subprocess-defs/sync')
+  },
+  /**
+   * 流程图查看：取引擎中该 key 部署产出的 BPMN XML。
+   * 不传 version 取最新版本；传 version 可核对指定历史版本。
+   */
+  bpmnXml(processKey, version) {
+    return http.get(`/admin/subprocess-defs/${encodeURIComponent(processKey)}/bpmn-xml`, {
+      params: version ? { version } : {}
+    })
   }
 }
 
