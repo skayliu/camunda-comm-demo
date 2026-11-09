@@ -190,13 +190,13 @@ async function submit() {
       })
     }
     if (res && res.error) {
-      message.warning(res.message || '操作失败')
+      message.warning(res.message || '提交失败')
       return
     }
-    message.success((res && res.message) || '操作成功')
+    message.success((res && res.message) || '已提交')
     emit('done')
   } catch (e) {
-    message.error((e.response && e.response.data && e.response.data.message) || '操作失败')
+    message.error((e.response && e.response.data && e.response.data.message) || '提交失败')
   }
 }
 

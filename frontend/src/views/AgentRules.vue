@@ -420,7 +420,7 @@ async function toggleRule(record, enable) {
   try {
     const res = await agentApi.enable(record.id)
     if (res && res.error) {
-      message.warning(res.message || '操作失败')
+      message.warning(res.message || '启用失败')
       return
     }
     message.success('规则已启用')
@@ -438,7 +438,7 @@ async function confirmDisable() {
   try {
     const res = await agentApi.disable(record.id, cancelActive.value)
     if (res && res.error) {
-      message.warning(res.message || '操作失败')
+      message.warning(res.message || '停用失败')
       return
     }
     const canceled = (res && res.canceled) || 0

@@ -88,7 +88,7 @@
         :description="`当前受托人：${task.assignee || '-'}。对方提交反馈或你收回后，任务才会回到你的待办。`"
       />
 
-        <!-- 部门沟通子流程待办：分发 / 经办 / 汇总由专用面板办理 -->
+        <!-- 部门沟通流程待办：分发 / 经办 / 汇总由专用面板办理 -->
         <template v-if="task.isDeptSubTask">
           <DeptSubTaskPanel ref="deptSubRef" :task-id="taskId" @done="onDeptSubDone" />
         </template>
@@ -325,7 +325,7 @@
       <!-- 详情没取到时不渲染任何操作按钮：否则 isCommTask 为空会走到审批分支，
            出现“发起沟通 / 通过审批”，把权限问题伪装成办理界面 -->
       <template v-if="loaded">
-        <!-- 部门沟通子流程：面板只负责渲染表单，提交动作统一由抽屉页脚触发，
+        <!-- 部门沟通流程：面板只负责渲染表单，提交动作统一由抽屉页脚触发，
              与「发起沟通 / 通过审批」保持同一位置，用户不需要在面板里找按钮 -->
         <template v-if="task.isDeptSubTask">
           <a-button type="primary" :loading="deptSubSubmitting" @click="submitDeptSub">
@@ -377,7 +377,7 @@
           >
             发起沟通
           </a-button>
-          <!-- 部门沟通：选择部门后由该部门的沟通子流程内部闭环处理，
+          <!-- 部门沟通：选择部门后由该部门按选定的部门沟通流程内部闭环处理，
                完成后把部门最终意见回填到沟通记录并解锁当前待办 -->
           <a-button
             :disabled="!canInitiate"
@@ -518,9 +518,9 @@ const replyContent = ref('')
 // 这里不做二次排序，避免与落库顺序不一致。
 const transferOpen = ref(false)
 // 部门沟通：与“发起沟通”并列的独立入口。部门沟通需要先选部门、再选该部门的
-// 沟通子流程（通用三节点或专属流程），所以不能复用按人员多选的沟通弹窗。
+// 部门沟通流程（通用三节点或专属流程），所以不能复用按人员多选的沟通弹窗。
 const deptCommOpen = ref(false)
-// 部门子流程面板：表单状态在子组件里，页脚按钮通过 expose 的 submit() 驱动提交
+// 部门沟通流程面板：表单状态在子组件里，页脚按钮通过 expose 的 submit() 驱动提交
 const deptSubRef = ref(null)
 const deptSubSubmitting = ref(false)
 

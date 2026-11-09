@@ -1007,7 +1007,7 @@
                       已收回<span v-if="item.withdrawTime">于 {{ fmtShort(item.withdrawTime) }}</span>
                     </div>
 
-                    <!-- camundaTaskId 存沟通旁路任务ID；deptProcInstId 存部门沟通子流程实例ID。
+                    <!-- camundaTaskId 存沟通旁路任务ID；deptProcInstId 存部门沟通实例ID。
                          沟通对象为部门时才有后者，空值表示这条沟通不是部门沟通。
                          这里直接给入口：沟通条目就是“这一趟沟通”，比回图上找节点更快。 -->
                     <div v-if="item.deptProcInstId" class="trace-comm-waiting is-muted">

@@ -313,14 +313,14 @@ export const commApi = {
   departments(keyword) {
     return http.get('/comm/departments', { params: { keyword } })
   },
-  /** 某部门可选的沟通子流程（通用三节点 + 部门专属） */
+  /** 某部门可选的部门沟通流程（通用三节点 + 部门专属） */
   subprocesses(deptId) {
     return http.get('/comm/subprocesses', { params: { deptId } })
   }
 }
 
 /**
- * 控制台 · 部门子流程注册表维护（仅 camunda-admin）。
+ * 控制台 · 部门沟通流程登记维护（仅 camunda-admin）。
  *
  * 服务端每个接口都会独立校验组归属，这里的调用不会因为前端藏了入口而变成"安全"，
  * 但能让非管理员少看到一次 403。
@@ -359,7 +359,7 @@ export const adminSubProcessApi = {
   }
 }
 
-/** 部门沟通子流程的待办办理 */
+/** 部门沟通流程的待办办理 */
 export const deptSubApi = {
   detail(taskId) {
     return http.get(`/comm/dept-sub/${taskId}`)

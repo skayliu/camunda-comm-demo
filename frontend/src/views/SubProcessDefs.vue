@@ -4,7 +4,7 @@
       <div>
         <h2 class="page-title">部门沟通流程登记</h2>
         <p class="page-desc">
-          决定「哪个部门的沟通启动哪个流程」。以 <span class="mono">dept_comm_</span> 开头的流程部署后会自动登记到这里
+          流程登记决定「哪个部门的沟通启动哪个流程」。以 <span class="mono">dept_comm_</span> 开头的流程部署后会自动写入流程登记，归属部门与启停状态由管理员维护
         </p>
       </div>
       <a-space>
@@ -148,8 +148,8 @@
         </template>
 
         <template #emptyText>
-          <a-empty description="还没有登记记录">
-            <a-button size="small" @click="openCreate">新增一条</a-button>
+          <a-empty description="还没有流程登记记录">
+            <a-button size="small" @click="openCreate">新增流程登记</a-button>
           </a-empty>
         </template>
       </a-table>
@@ -424,7 +424,7 @@ async function toggleStatus(record) {
   try {
     const res = await adminSubProcessApi.setStatus(record.id, next)
     if (res && res.error) {
-      message.warning(res.message || '操作失败')
+      message.warning(res.message || (next === 1 ? '启用失败' : '停用失败'))
       return
     }
     message.success(next === 1 ? '已启用，发起时可见' : '已停用，只影响后续发起')

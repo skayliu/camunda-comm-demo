@@ -28,9 +28,9 @@
         />
       </a-form-item>
 
-      <a-form-item label="沟通子流程" required>
+      <a-form-item label="沟通流程" required>
         <a-spin :spinning="subLoading">
-          <a-select v-model:value="form.subProcessKey" placeholder="选择该部门的处理流程">
+          <a-select v-model:value="form.subProcessKey" placeholder="选择该部门使用的流程">
             <a-select-option v-for="sp in subProcesses" :key="sp.processKey" :value="sp.processKey">
               <div class="sp-option">
                 <span>{{ sp.processName }}</span>
@@ -100,7 +100,7 @@ async function onDeptChange(deptId) {
       form.subProcessKey = subProcesses.value[0].processKey
     }
   } catch (e) {
-    message.error('子流程列表加载失败')
+    message.error('流程列表加载失败')
   } finally {
     subLoading.value = false
   }
@@ -112,7 +112,7 @@ function close() {
 
 async function submit() {
   if (!form.deptId) return message.warning('请选择征询部门')
-  if (!form.subProcessKey) return message.warning('请选择沟通子流程')
+  if (!form.subProcessKey) return message.warning('请选择沟通流程')
   if (!form.content.trim()) return message.warning('请填写沟通内容')
 
   const dept = departments.value.find((d) => d.id === form.deptId)
