@@ -138,6 +138,9 @@ public class CommunicationController {
         return result;
     }
 
+    @Autowired
+    private com.example.camundademo.service.SignService signService;
+
     /** 完成任务（审批提交）：只能完成分派给自己的任务；可选审批意见 */
     @PostMapping("/demo/complete/{taskId}")
     public Map<String, Object> complete(@PathVariable String taskId,
@@ -155,15 +158,18 @@ public class CommunicationController {
         }
 
         Object comment = req == null ? null : req.get("comment");
+        Object approvedRaw = req == null ? null : req.get("approved");
+        boolean approved = approvedRaw == null || !"false".equalsIgnoreCase(String.valueOf(approvedRaw));
         try {
-            if (comment != null && !String.valueOf(comment).isBlank()) {
-                // createComment 的第二个参数是流程实例ID（不是 userId）。
-                // 传 currentUser 会把意见挂到一个不存在的流程实例上，
-                // 已办详情与流程图按 procInstId 关联时就会查不到这条意见。
-                taskService.createComment(taskId, task.getProcessInstanceId(), String.valueOf(comment));
+            // 加签任务（子轮次里的 addSignTask）走加签专用提交：驳回要立即终止整轮
+            if (com.example.camundademo.service.SignService.ADD_SIGN_TASK_KEY
+                    .equals(task.getTaskDefinitionKey())) {
+                return signService.completeAddSignTask(taskId, currentUser, approved,
+                        comment == null ? null : String.valueOf(comment));
             }
-            taskService.complete(taskId);
-            return Collections.singletonMap("result", "ok");
+            // 主任务：意见、并加签状态收口、complete 放在同一个引擎命令里
+            return signService.completeMainTask(taskId, currentUser, approved,
+                    comment == null ? null : String.valueOf(comment));
         } catch (RuntimeException e) {
             // 只把“沟通中拦截”翻译成业务响应；其余异常原样抛出，让接口返回 5xx。
             // 原实现 catch(Exception) 会把手写错误（变量缺失、任务不存在等）也伪装成

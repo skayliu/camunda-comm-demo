@@ -5,6 +5,7 @@ import com.example.camundademo.entity.BizCcRecord;
 import com.example.camundademo.entity.BizCommSession;
 import com.example.camundademo.entity.BizCommTask;
 import com.example.camundademo.entity.BizHandleRecord;
+import com.example.camundademo.entity.BizSignRecord;
 import com.example.camundademo.entity.BizTaskDelegate;
 import com.example.camundademo.entity.BizTaskExt;
 import com.example.camundademo.entity.BizTaskTransfer;
@@ -14,6 +15,7 @@ import com.example.camundademo.persistence.BizCcRecordManager;
 import com.example.camundademo.persistence.BizCommSessionManager;
 import com.example.camundademo.persistence.BizHandleRecordManager;
 import com.example.camundademo.persistence.BizCommTaskManager;
+import com.example.camundademo.persistence.BizSignRecordManager;
 import com.example.camundademo.persistence.BizTaskDelegateManager;
 import com.example.camundademo.persistence.BizTaskExtManager;
 import com.example.camundademo.persistence.BizTaskTransferManager;
@@ -49,7 +51,8 @@ public class CommProcessEnginePlugin extends AbstractProcessEnginePlugin {
             "mapper/BizTaskDelegate.xml",
             "mapper/BizAgentRule.xml",
             "mapper/BizCcRecord.xml",
-            "mapper/BizHandleRecord.xml"
+            "mapper/BizHandleRecord.xml",
+            "mapper/BizSignRecord.xml"
     };
 
     @Override
@@ -80,6 +83,7 @@ public class CommProcessEnginePlugin extends AbstractProcessEnginePlugin {
         sessionFactories.add(new BizAgentRuleManager.Factory());
         sessionFactories.add(new BizCcRecordManager.Factory());
         sessionFactories.add(new BizHandleRecordManager.Factory());
+        sessionFactories.add(new BizSignRecordManager.Factory());
 
         // 3. 注册自定义命令拦截器（审批时校验沟通状态）
         // 必须放入 post 链：它位于 CommandContextInterceptor 之后，
@@ -149,6 +153,11 @@ public class CommProcessEnginePlugin extends AbstractProcessEnginePlugin {
         updateMappings.put(BizHandleRecord.class, "updateBizHandleRecord");
         deleteMappings.put(BizHandleRecord.class, "deleteBizHandleRecord");
         selectMappings.put(BizHandleRecord.class, "selectBizHandleRecord");
+
+        insertMappings.put(BizSignRecord.class, "insertBizSignRecord");
+        updateMappings.put(BizSignRecord.class, "updateBizSignRecord");
+        deleteMappings.put(BizSignRecord.class, "deleteBizSignRecord");
+        selectMappings.put(BizSignRecord.class, "selectBizSignRecord");
 
         dbSqlSessionFactory.setInsertStatements(insertMappings);
         dbSqlSessionFactory.setUpdateStatements(updateMappings);

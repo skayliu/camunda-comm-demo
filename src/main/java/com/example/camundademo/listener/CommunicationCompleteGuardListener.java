@@ -39,8 +39,17 @@ public class CommunicationCompleteGuardListener implements TaskListener {
         }
         BizTaskExt ext = commandContext.getSession(BizTaskExtManager.class)
                 .findByTaskId(delegateTask.getId());
-        if (ext != null && BizTaskExt.STATUS_COMMUNICATING.equals(ext.getBizStatus())) {
+        if (ext == null) {
+            return;
+        }
+        if (BizTaskExt.STATUS_COMMUNICATING.equals(ext.getBizStatus())) {
             throw new CommunicationLockedException("当前待办正在沟通中，请等待沟通完成或收回沟通后再审批");
+        }
+        if (BizTaskExt.STATUS_WAIT_PRE_SIGN.equals(ext.getBizStatus())) {
+            throw new CommunicationLockedException("当前待办已发起前加签，请等待加签轮次结束后再审批");
+        }
+        if (BizTaskExt.STATUS_WAIT_POST_SIGN.equals(ext.getBizStatus())) {
+            throw new CommunicationLockedException("当前待办的后加签仍在进行，请等待加签轮次结束后再提交");
         }
     }
 }

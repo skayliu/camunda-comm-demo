@@ -1,5 +1,6 @@
 package com.example.camundademo.controller;
 
+import com.example.camundademo.config.DeptSubProcessDeploymentRegistrar;
 import com.example.camundademo.entity.BizSubProcessDef;
 import com.example.camundademo.security.AdminAccess;
 import com.example.camundademo.service.BusinessException;
@@ -34,11 +35,14 @@ import java.util.Map;
 public class SubProcessDefAdminController {
 
     private final SubProcessDefService subProcessDefService;
+    private final DeptSubProcessDeploymentRegistrar registrar;
     private final AdminAccess adminAccess;
 
     public SubProcessDefAdminController(SubProcessDefService subProcessDefService,
+                                        DeptSubProcessDeploymentRegistrar registrar,
                                         AdminAccess adminAccess) {
         this.subProcessDefService = subProcessDefService;
+        this.registrar = registrar;
         this.adminAccess = adminAccess;
     }
 
@@ -138,6 +142,21 @@ public class SubProcessDefAdminController {
         adminAccess.require(authentication);
         Map<String, Integer> stat = subProcessDefService.syncFromEngine();
         Map<String, Object> result = new LinkedHashMap<>(stat);
+        result.put("success", true);
+        return result;
+    }
+
+    /**
+     * 自动登记器实时诊断：队列积压、正在重试/兜底的部署、累计兜底与放弃次数、消费线程状态。
+     *
+     * <p>只读。放在管理页"从引擎同步"旁边，是为了让"注册表少了记录"这类问题
+     * 不必等它变成一条业务投诉才被发现：{@code pendingCount} 长期不归零、
+     * {@code giveUpTotal} 大于 0，都说明部署可见性在抖或登记链路出了问题。</p>
+     */
+    @GetMapping("/registrar-diagnostics")
+    public Map<String, Object> registrarDiagnostics(Authentication authentication) {
+        adminAccess.require(authentication);
+        Map<String, Object> result = new LinkedHashMap<>(registrar.diagnostics());
         result.put("success", true);
         return result;
     }

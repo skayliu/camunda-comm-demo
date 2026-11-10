@@ -12,6 +12,8 @@
           沟通
         </a-tag>
         <a-tag v-else color="blue">审批待办</a-tag>
+        <a-tag v-if="task.isAddSignTask" color="purple">加签待办</a-tag>
+        <a-tag v-else-if="signLocked" color="orange">加签中</a-tag>
         <a-tag v-if="task.delegationState === 'PENDING'" color="purple">委托中</a-tag>
         <a-tag v-else-if="task.delegationMode === 'SIGN'" color="geekblue">全权受托</a-tag>
         <a-tag v-if="transfers.length" color="cyan">已转办 {{ transfers.length }} 次</a-tag>
@@ -61,6 +63,62 @@
       <!-- 委托记录：责任仍在委托人，受托人只能提交反馈 -->
       <DetailSection v-if="delegations.length" title="委托记录" :extra="`共 ${delegations.length} 次`">
         <DelegationChain :delegations="delegations" />
+      </DetailSection>
+
+      <!-- 加签记录：前/后/并加签都挂在来源待办上，减签入口也只出现在未处理的人身上 -->
+      <DetailSection v-if="signRecords.length" title="加签记录" :extra="`共 ${signRecords.length} 条`">
+        <div v-for="r in signRecords" :key="r.id" class="sign-item">
+          <!-- 类型 + 姓名留在左侧，模式/状态/减签收到右侧单独一组：
+               标签之间用 gap 统一控制，且清掉 antd Tag 自带的右外边距，
+               避免「并行」和「已撤销」两个彩块贴成一条 -->
+          <div
+            class="sign-item-head"
+            style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px"
+          >
+            <a-tag :color="signTypeColor(r.signType)" style="margin-inline-end: 0">
+              {{ signTypeText(r.signType) }}
+            </a-tag>
+            <b>{{ r.addUserId }}</b>
+            <span style="flex: 1"></span>
+            <span style="display: inline-flex; align-items: center; flex-wrap: wrap; gap: 12px">
+              <a-tag
+                v-if="r.signMode"
+                :color="r.signMode === 'SEQUENTIAL' ? 'cyan' : 'geekblue'"
+                style="margin-inline-end: 0"
+              >
+                {{ r.signMode === 'SEQUENTIAL' ? '串行' : '并行' }}
+              </a-tag>
+              <a-tag :color="signStatusColor(r.status)" style="margin-inline-end: 0">
+                {{ signStatusText(r.status) }}
+              </a-tag>
+              <a-popconfirm
+                v-if="r.status === 'PENDING' && r.initiatorId === currentUser"
+                title="减签？减掉后可按同一配置补人，不推翻整轮"
+                ok-text="减签"
+                cancel-text="取消"
+                @confirm="removeSign(r)"
+              >
+                <a-button size="small" type="link" danger style="padding-inline: 4px">
+                  减签
+                </a-button>
+              </a-popconfirm>
+            </span>
+          </div>
+          <!-- 意见单独成块：这是发起人「为什么加签」的说明，长文本需要与标签行分离 -->
+          <div
+            v-if="r.opinion"
+            class="sign-opinion"
+            style="margin-top: 6px; padding: 4px 10px; font-size: 12.5px; line-height: 1.7;
+                   color: rgba(0, 0, 0, 0.65); background: rgba(0, 0, 0, 0.025);
+                   border-left: 2px solid rgba(0, 0, 0, 0.12); border-radius: 0 2px 2px 0"
+          >
+            意见：{{ r.opinion }}
+          </div>
+          <div class="muted" style="font-size: 11.5px; margin-top: 4px">
+            发起人 {{ r.initiatorId }} · {{ fmt(r.createTime) }}
+            <span v-if="r.finishTime"> · 完成 {{ fmt(r.finishTime) }}</span>
+          </div>
+        </div>
       </DetailSection>
 
       <div v-if="task.canResolveDelegation" class="drawer-section">
@@ -186,13 +244,21 @@
 
         <!-- 审批待办：沟通会话 + 审批 -->
         <template v-else>
-          <div class="drawer-section">
+          <a-alert
+            v-if="task.isAddSignTask"
+            type="info"
+            show-icon
+            style="margin-bottom: 12px"
+            message="你正在处理一条加签待办"
+            :description="`来源待办：${signSelfRecord ? signSelfRecord.sourceTaskDefKey : '-'}。同意即计入本轮结果；驳回会让整轮立即不通过，其余加签人的待办一并撤销。`"
+          />
+          <div v-if="!task.isAddSignTask" class="drawer-section">
             <div class="drawer-section-title">沟通状态</div>
             <a-alert
               v-if="isLocked"
               type="warning"
               show-icon
-              message="当前待办正在沟通中，暂不可审批"
+              :message="lockMessage"
               :description="lockDescription"
             />
             <a-alert
@@ -354,8 +420,8 @@
 
         <template v-else>
           <!-- 转办条件由后端 canTransfer 统一计算：当前办理人本人、非沟通待办、不在沟通中 -->
-          <a-button v-if="task.canTransfer" @click="openTransfer">转办</a-button>
-          <a-button v-if="task.canDelegate" @click="delegateOpen = true">委托</a-button>
+          <a-button v-if="task.canTransfer && !task.isAddSignTask" @click="openTransfer">转办</a-button>
+          <a-button v-if="task.canDelegate && !task.isAddSignTask" @click="delegateOpen = true">委托</a-button>
           <template v-if="task.canResolveDelegation">
             <a-button type="primary" :loading="delegationSubmitting" @click="submitResolve">
               提交反馈并交回
@@ -370,6 +436,23 @@
           >
             <a-button danger>收回委托</a-button>
           </a-popconfirm>
+          <!-- 加签：前/并/后三种落在不同执行层，由弹层按类型提交；
+               加签进行中或已是加签任务时不再显示入口，避免嵌套加签 -->
+          <a-dropdown v-if="canAddSign">
+            <a-button>加签 ▾</a-button>
+            <template #overlay>
+              <a-menu @click="onSignMenu">
+                <a-menu-item key="PRE">前加签（我先请他审）</a-menu-item>
+                <!-- 单实例节点上并加签必然失败，后端按节点是否多实例下发该标记 -->
+                <a-menu-item v-if="task.supportsParallelSign" key="PARALLEL">
+                  并加签（同轮一起审）
+                </a-menu-item>
+                <a-menu-item key="POST">后加签（我通过后再审）</a-menu-item>
+              </a-menu>
+            </template>
+          </a-dropdown>
+          <!-- 加签任务只保留同意/驳回：转办、传阅、沟通都不该出现在子轮次里 -->
+          <template v-if="!task.isAddSignTask">
           <a-button
             :disabled="!canInitiate"
             :title="canInitiate ? '' : '仅当前待办处理人可传阅'"
@@ -409,10 +492,31 @@
           >
             <a-button danger>全部收回</a-button>
           </a-popconfirm>
+          </template>
+          <!-- 加签任务：只有“同意 / 驳回”，驳回即整轮不通过 -->
+          <template v-if="task.isAddSignTask">
+            <a-button
+              type="primary"
+              :loading="submitting"
+              :disabled="signSelfRecord && signSelfRecord.status !== 'PENDING'"
+              @click="submitAddSign(true)"
+            >
+              同意
+            </a-button>
+            <a-button
+              danger
+              :loading="submitting"
+              :disabled="signSelfRecord && signSelfRecord.status !== 'PENDING'"
+              @click="submitAddSign(false)"
+            >
+              驳回（整轮不通过）
+            </a-button>
+          </template>
           <a-tooltip
+            v-else
             :title="task.delegationState === 'PENDING'
               ? '委托中的任务需先由受托人提交反馈或委托人收回'
-              : (isLocked ? '存在未反馈且未收回的沟通对象，无法审批' : '')"
+              : (isLocked ? lockDescription : '')"
           >
             <a-button
               type="primary"
@@ -499,6 +603,14 @@
       @done="load"
     />
 
+    <SignModal
+      v-model:open="signOpen"
+      :task-id="taskId"
+      :task-name="task.taskName"
+      :sign-type="signType"
+      @done="onSignDone"
+    />
+
     <DeptCommModal
       v-model:open="deptCommOpen"
       :task-id="taskId"
@@ -509,10 +621,10 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, reactive, ref, watch } from 'vue'
 import message from 'ant-design-vue/es/message'
 import dayjs from 'dayjs'
-import { commApi, errorText, wbApi } from '../api'
+import { commApi, errorText, getUser, signApi, wbApi } from '../api'
 import TransferModal from './TransferModal.vue'
 import DeptCommModal from './DeptCommModal.vue'
 import CcHandleModal from './CcHandleModal.vue'
@@ -522,6 +634,9 @@ import DeptSubTaskPanel from './DeptSubTaskPanel.vue'
 import DetailDrawer from './DetailDrawer.vue'
 import DetailSection from './DetailSection.vue'
 import TransferChain from './TransferChain.vue'
+
+// 加签弹层只在点「加签」时才用得到，与其他弹层一致按需加载
+const SignModal = defineAsyncComponent(() => import('./SignModal.vue'))
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -537,6 +652,86 @@ const submitting = ref(false)
 const task = ref({})
 const approveComment = ref('')
 const replyContent = ref('')
+
+// ===== 加签 =====
+// 加签记录随 taskDetail 一次返回；减签入口只对“本人发起且仍未处理”的记录展示
+const currentUser = getUser()
+const signOpen = ref(false)
+const signType = ref('PRE')
+const signRecords = computed(() =>
+  Array.isArray(task.value.signRecords) ? task.value.signRecords : []
+)
+// 当前这条任务如果本身就是加签任务，找到对应记录用于判断是否已处理。
+// 并加签扩容任务拿不到回填的 addTaskId（后端按轮次反查后直接下发 selfSignRecord），优先用它。
+const signSelfRecord = computed(() =>
+  task.value.selfSignRecord
+  || signRecords.value.find((r) => r.addTaskId === props.taskId)
+  || null
+)
+const signLocked = computed(() =>
+  ['WAIT_PRE_SIGN', 'WAIT_POST_SIGN'].includes(comm.value.bizStatus)
+)
+// 加签入口：普通审批任务、待办归自己、没有沟通/加签锁定
+const canAddSign = computed(() =>
+  !!task.value.canAddSign
+  && canInitiate.value
+  && !signLocked.value
+  && comm.value.bizStatus !== 'COMMUNICATING'
+)
+
+function onSignMenu({ key }) {
+  signType.value = key
+  signOpen.value = true
+}
+
+async function onSignDone() {
+  await load()
+  emit('refresh')
+}
+
+function signTypeText(type) {
+  if (type === 'PARALLEL') return '并加签'
+  if (type === 'POST') return '后加签'
+  return '前加签'
+}
+
+function signTypeColor(type) {
+  if (type === 'PARALLEL') return 'blue'
+  if (type === 'POST') return 'gold'
+  return 'purple'
+}
+
+function signStatusText(status) {
+  const map = {
+    PENDING: '待处理',
+    APPROVED: '已同意',
+    REJECTED: '已驳回',
+    CANCELLED: '已撤销'
+  }
+  return map[status] || status || '-'
+}
+
+function signStatusColor(status) {
+  if (status === 'APPROVED') return 'green'
+  if (status === 'REJECTED') return 'red'
+  if (status === 'CANCELLED') return 'default'
+  return 'processing'
+}
+
+async function removeSign(record) {
+  try {
+    const res = await signApi.remove(record.id)
+    if (res && res.error) {
+      message.warning(res.message || '减签失败')
+      return
+    }
+    message.success('已减签，可重新加签补人')
+    await load()
+    emit('refresh')
+  } catch (e) {
+    message.error(errorText(e))
+  }
+}
 
 // 转办记录：后端按时间升序返回，最后一条的接收人就是当前办理人。
 // 这里不做二次排序，避免与落库顺序不一致。
@@ -753,9 +948,21 @@ const pendingCommTargets = computed(() => {
   return list.filter((t) => t.status === 'PENDING')
 })
 
-const isLocked = computed(() => comm.value.bizStatus === 'COMMUNICATING')
+const isLocked = computed(() =>
+  comm.value.bizStatus === 'COMMUNICATING' || signLocked.value
+)
 const canInitiate = computed(() => !!comm.value.canInitiate)
+const lockMessage = computed(() => {
+  if (signLocked.value) return '当前待办因加签暂时锁定'
+  return '当前待办正在沟通中，暂不可审批'
+})
 const lockDescription = computed(() => {
+  if (comm.value.bizStatus === 'WAIT_PRE_SIGN') {
+    return '当前待办已发起前加签，需加签轮次结束（通过或驳回）后才能继续审批。'
+  }
+  if (comm.value.bizStatus === 'WAIT_POST_SIGN') {
+    return '当前待办的后加签仍在进行，加签轮次结束后节点才会流转。'
+  }
   const pending = pendingCommTargets.value
   if (!pending.length) {
     return '沟通状态正在刷新，请稍后再试。'
@@ -1077,6 +1284,28 @@ async function submitReply() {
     message.success('反馈已提交')
     close()
     emit('refresh')
+  } catch (e) {
+    message.error(errorText(e))
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function submitAddSign(approved) {
+  submitting.value = true
+  try {
+    const res = await signApi.completeAddSignTask(
+      props.taskId,
+      approved,
+      approveComment.value.trim() || null
+    )
+    if (res && res.error) {
+      message.warning(res.message || '无法提交加签意见')
+    } else {
+      message.success(approved ? '已同意' : '已驳回，整轮不通过')
+      close()
+      emit('refresh')
+    }
   } catch (e) {
     message.error(errorText(e))
   } finally {

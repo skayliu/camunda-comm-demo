@@ -1,8 +1,10 @@
 package com.example.camundademo;
 
+import com.example.camundademo.config.DeptSubProcessDeploymentRegistrar;
 import com.example.camundademo.security.DemoUserInitializer;
 import com.example.camundademo.support.TestSession;
 import org.camunda.bpm.engine.RepositoryService;
+import org.camunda.bpm.engine.repository.ProcessDefinition;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -68,6 +70,10 @@ class DeptSubProcessDefAdminTest {
 
     @Autowired
     private DemoUserInitializer demoUserInitializer;
+
+    /** 只在超时诊断里读队列与重试计数 */
+    @Autowired
+    private DeptSubProcessDeploymentRegistrar registrar;
 
     @BeforeEach
     void ensureDemoIdentity() {
@@ -313,7 +319,27 @@ class DeptSubProcessDefAdminTest {
             sleep(300);
         }
         throw new IllegalStateException("等待自动登记 " + key + " v" + expectVersion
-                + " 超时，最后一条记录: " + last);
+                + " 超时；" + diagnostics(key, last));
+    }
+
+    /**
+     * 超时诊断：自动登记是异步链路，只说"最后一条记录为空"无法区分是部署还没提交、
+     * 队列里这条被消费线程丢了、还是消费线程本身已经停了。把三者一起带进报错，
+     * 下次偶发就不用靠猜。
+     */
+    private String diagnostics(String key, Map<String, Object> last) {
+        List<ProcessDefinition> defs = repositoryService.createProcessDefinitionQuery()
+                .processDefinitionKey(key)
+                .list();
+        Map<String, Long> deploymentVisible = new LinkedHashMap<>();
+        for (String deploymentId : defs.stream().map(ProcessDefinition::getDeploymentId).distinct().toList()) {
+            deploymentVisible.put(deploymentId,
+                    repositoryService.createDeploymentQuery().deploymentId(deploymentId).count());
+        }
+        return "引擎可见版本=" + defs.stream().map(ProcessDefinition::getVersion).toList()
+                + "，部署可见性=" + deploymentVisible
+                + "，注册器=" + registrar.diagnostics()
+                + "，最后一条记录=" + last;
     }
 
     private int countByKey(String key) {

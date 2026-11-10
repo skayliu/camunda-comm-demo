@@ -1,6 +1,8 @@
 package com.example.camundademo.config;
 
 import org.camunda.bpm.engine.impl.cmd.DeployCmd;
+import org.camunda.bpm.engine.impl.cfg.ProcessEngineConfigurationImpl;
+import org.camunda.bpm.engine.impl.context.Context;
 import org.camunda.bpm.engine.impl.interceptor.Command;
 import org.camunda.bpm.engine.impl.interceptor.CommandInterceptor;
 import org.camunda.bpm.engine.repository.Deployment;
@@ -27,7 +29,10 @@ public class DeploymentRegistryInterceptor extends CommandInterceptor {
     public <T> T execute(Command<T> command) {
         T result = next.execute(command);
         if (command instanceof DeployCmd && result instanceof Deployment deployment) {
-            DeptSubProcessDeploymentRegistrar.markDeployed(deployment.getId());
+            // 按"当前引擎配置实例"入队，保证同一个 JVM 里的多个应用上下文
+            // 各自只消费自己的部署事件，不会互相把对方的 ID 取走丢弃
+            ProcessEngineConfigurationImpl engineConfig = Context.getProcessEngineConfiguration();
+            DeptSubProcessDeploymentRegistrar.markDeployed(engineConfig, deployment.getId());
         }
         return result;
     }

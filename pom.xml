@@ -42,6 +42,12 @@
             <artifactId>camunda-bpm-spring-boot-starter-rest</artifactId>
             <version>${camunda.spring-boot.version}</version>
         </dependency>
+        <!-- 读取 BPMN 模型判断节点是否多实例（并加签的前置条件），需显式引入 -->
+        <dependency>
+            <groupId>org.camunda.bpm.model</groupId>
+            <artifactId>camunda-bpmn-model</artifactId>
+            <version>${camunda.spring-boot.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-security</artifactId>

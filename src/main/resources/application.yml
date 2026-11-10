@@ -23,6 +23,13 @@ spring:
         - classpath:db/migration/h2/V5__dept_subprocess_registry.sql
         - classpath:db/migration/h2/V6__cc_and_handle.sql
         - classpath:db/migration/h2/V7__cc_note.sql
+        - classpath:db/migration/h2/V8__add_sign.sql
+
+# 加签：完成条件由管理员在部署期决定（ALL 全部通过 / ANY 任一通过）。
+# 接口不接收该参数，发起人只能选择并行或串行，避免两个开关互相覆盖。
+app:
+  add-sign:
+    approve-mode: ALL
 
 camunda.bpm:
   # Camunda 7.24 默认不再自动部署 classpath 下的 BPMN，需显式开启

@@ -40,11 +40,17 @@ public class CommunicationCommandInterceptor extends CommandInterceptor {
                 if (BizCommTask.isCommTaskKey(task.getTaskDefinitionKey())) {
                     return next.execute(command);
                 }
-                // 主流程待办：校验沟通状态
+                // 主流程待办：校验沟通/加签锁定状态
                 BizTaskExtManager extMgr = getContext().getSession(BizTaskExtManager.class);
                 BizTaskExt ext = extMgr.findByTaskId(taskId);
                 if (ext != null && BizTaskExt.STATUS_COMMUNICATING.equals(ext.getBizStatus())) {
                     throw new CommunicationLockedException("当前待办正在沟通中，请等待沟通完成或收回沟通后再审批");
+                }
+                if (ext != null && BizTaskExt.STATUS_WAIT_PRE_SIGN.equals(ext.getBizStatus())) {
+                    throw new CommunicationLockedException("当前待办已发起前加签，请等待加签轮次结束后再审批");
+                }
+                if (ext != null && BizTaskExt.STATUS_WAIT_POST_SIGN.equals(ext.getBizStatus())) {
+                    throw new CommunicationLockedException("当前待办的后加签仍在进行，请等待加签轮次结束后再提交");
                 }
             }
         }

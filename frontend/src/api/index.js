@@ -348,6 +348,10 @@ export const adminSubProcessApi = {
   sync() {
     return http.post('/admin/subprocess-defs/sync')
   },
+  /** 自动登记器实时诊断（只读）：队列积压、重试/兜底中的部署、累计兜底与放弃次数 */
+  registrarDiagnostics() {
+    return http.get('/admin/subprocess-defs/registrar-diagnostics')
+  },
   /**
    * 流程图查看：取引擎中该 key 部署产出的 BPMN XML。
    * 不传 version 取最新版本；传 version 可核对指定历史版本。
@@ -379,6 +383,37 @@ export const deptSubApi = {
   /** 汇总节点：提交 / 退回补充 / 重新分发 */
   summary(taskId, payload) {
     return http.post(`/comm/dept-sub/${taskId}/summary`, payload)
+  }
+}
+
+/**
+ * 加签：前加签 / 后加签 / 并加签。
+ *
+ * 完成条件（全部通过 / 任一通过）由管理员在部署期配置，接口不接受该参数；
+ * 前端只负责让发起人选“并行 / 串行”。
+ */
+export const signApi = {
+  /** 前加签 / 并加签：users 一次传完，sequential 仅前加签有效 */
+  add(payload) {
+    return http.post('/sign/add', payload)
+  },
+  /** 通过审批并后加签：原意见先暂存，子轮次结束后再真正完成原任务 */
+  completePost(payload) {
+    return http.post('/sign/complete-post', payload)
+  },
+  /** 加签人提交（同意 / 驳回）；任一驳回即整轮不通过 */
+  completeAddSignTask(taskId, approved, comment) {
+    return http.post(`/sign/task/${taskId}/complete`, { approved, comment })
+  },
+  /** 减签：只能减还没提交意见的人，减完可补人 */
+  remove(recordId) {
+    return http.post(`/sign/${recordId}/remove`)
+  },
+  byTask(taskId) {
+    return http.get(`/sign/task/${taskId}`)
+  },
+  byProcess(processInstanceId) {
+    return http.get(`/sign/process/${processInstanceId}`)
   }
 }
 

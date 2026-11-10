@@ -76,6 +76,9 @@ public class WorkbenchService {
     @Autowired
     private TaskDelegateService taskDelegateService;
 
+    @Autowired
+    private SignService signService;
+
     // ===== 当前用户 =====
 
     public Map<String, Object> currentUserInfo(String userId) {
@@ -256,6 +259,24 @@ public class WorkbenchService {
             vo.put("commStatusOfSelf", communicationService.getTaskCommStatus(taskId, userId));
         }
         vo.put("comments", commentsOf(taskId));
+        // 加签记录：前/后/并加签都按来源待办聚合，详情页一次取回，避免前端 N 次请求
+        vo.put("signRecords", signService.listByTaskId(taskId));
+        // 并加签扩容出来的任务复用原节点 key，只看 key 会把它当普通审批：抽屉里只渲染“通过审批”，
+        // 加签人没有驳回入口。这里按「同流程 + 同节点 + 同办理人 + PENDING」反查所属轮次，
+        // 把它统一认成加签待办，并带上本人的那条记录与整轮进度。
+        List<Map<String, Object>> parallelRound = signService.roundRecordsOfParallelTask(task);
+        boolean addSignTodo = Boolean.TRUE.equals(vo.get("isAddSignTask")) || !parallelRound.isEmpty();
+        if (!parallelRound.isEmpty()) {
+            vo.put("isAddSignTask", true);
+            vo.put("signRecords", parallelRound);
+            vo.put("selfSignRecord", parallelRound.stream()
+                    .filter(r -> userId != null && userId.equals(r.get("addUserId")))
+                    .findFirst().orElse(null));
+        }
+        // 加签入口只在普通审批任务上开放：沟通任务、部门子流程任务、加签待办各有自己的闭环
+        vo.put("canAddSign", !isComm && !isDeptSub && !addSignTodo);
+        // 单实例节点上并加签必然失败，前端据此隐藏该选项（多实例节点才出现）
+        vo.put("supportsParallelSign", signService.supportsParallelSign(task));
         // 转办链与可转办标记：沟通中/沟通待办/委托中不可转办，后端与前端共用同一口径
         vo.put("transfers", taskTransferService.listByTaskId(taskId));
         // 委托链与可操作标记
@@ -345,6 +366,9 @@ public class WorkbenchService {
         vo.put("taskName", t.getName());
         vo.put("taskDefKey", t.getTaskDefinitionKey());
         vo.put("isCommTask", isComm);
+        // 加签子轮次里的任务：前端据此渲染“提交加签意见”而不是普通审批
+        vo.put("isAddSignTask", com.example.camundademo.service.SignService.ADD_SIGN_TASK_KEY
+                .equals(t.getTaskDefinitionKey()));
         vo.put("isFollowUp", false);
         vo.put("processInstanceId", t.getProcessInstanceId());
         vo.put("assignee", t.getAssignee());

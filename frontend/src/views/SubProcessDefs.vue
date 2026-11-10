@@ -7,21 +7,59 @@
           流程登记决定「哪个部门的沟通启动哪个流程」。以 <span class="mono">dept_comm_</span> 开头的流程部署后会自动写入流程登记，归属部门与启停状态由管理员维护
         </p>
       </div>
-      <a-space>
-        <a-button :loading="syncing" @click="syncFromEngine">
-          <template #icon><SyncOutlined /></template>
-          从引擎同步
-        </a-button>
-        <a-button type="primary" @click="openCreate">
-          <template #icon><PlusOutlined /></template>
-          新增登记
-        </a-button>
-        <a-button :loading="loading" @click="load">
-          <template #icon><ReloadOutlined /></template>
-          刷新
-        </a-button>
-      </a-space>
+      <div class="head-actions">
+        <a-tooltip placement="bottomRight">
+          <template #title>
+            <!-- 提示层渲染在 body 下，scoped 样式不生效，这里用内联样式 -->
+            <div style="font-size: 12px; line-height: 1.8">
+              <div style="font-weight: 600; margin-bottom: 2px">自动登记器</div>
+              <template v-if="diag">
+                <div>待登记队列：{{ diag.pendingCount }} 条</div>
+                <div>逐条重试中：{{ diag.visibilityRetrying }} 条（上限 {{ diag.maxVisibilityRetry }} 轮）</div>
+                <div>兜底同步中：{{ diag.fallbackWaiting }} 条（预算 {{ diag.maxFallbackSync }} 次）</div>
+                <div>累计兜底 {{ diag.fallbackTotal }} 次 · 累计放弃 {{ diag.giveUpTotal }} 条</div>
+                <div>已处理 {{ diag.processedTotal }} 条 · 消费线程{{ consumerText }}</div>
+              </template>
+              <div v-else>诊断接口不可用，无法读取队列状态</div>
+            </div>
+          </template>
+          <div class="reg-health" :class="health.tone">
+            <span class="dot"></span>
+            <span>队列 {{ diag ? diag.pendingCount : '—' }}</span>
+            <span class="sep">·</span>
+            <span>兜底 {{ diag ? diag.fallbackTotal : '—' }}</span>
+            <template v-if="diag && diag.giveUpTotal > 0">
+              <span class="sep">·</span>
+              <span>放弃 {{ diag.giveUpTotal }}</span>
+            </template>
+          </div>
+        </a-tooltip>
+        <a-space>
+          <a-button :loading="syncing" @click="syncFromEngine">
+            <template #icon><SyncOutlined /></template>
+            从引擎同步
+          </a-button>
+          <a-button type="primary" @click="openCreate">
+            <template #icon><PlusOutlined /></template>
+            新增登记
+          </a-button>
+          <a-button :loading="loading" @click="load">
+            <template #icon><ReloadOutlined /></template>
+            刷新
+          </a-button>
+        </a-space>
+      </div>
     </div>
+
+    <a-alert
+      v-if="health.tone === 'danger'"
+      type="error"
+      show-icon
+      closable
+      style="margin-bottom: 14px"
+      :message="health.message"
+      description="自动登记器已放弃过的部署不会再自动补。点「从引擎同步」可立即对齐一次；若反复出现，先查引擎部署是否延迟可见或登记表是否可写。"
+    />
 
     <a-alert
       type="info"
@@ -242,7 +280,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import message from 'ant-design-vue/es/message'
 import { PlusOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons-vue'
 import BpmnDiagramModal from '../components/BpmnDiagramModal.vue'
@@ -253,6 +291,11 @@ const keyword = ref('')
 const loading = ref(false)
 const syncing = ref(false)
 const saving = ref(false)
+
+// 自动登记器诊断：用来把"注册表少了一条记录"提前暴露成页面上的可见信号
+const diag = ref(null)
+let diagTimer = null
+const DIAG_REFRESH_MS = 10000
 
 const deptOptions = ref([{ value: '*', label: '全部门通用（*）' }])
 const loadingDepts = ref(false)
@@ -298,6 +341,39 @@ function versionGap(record) {
   return !record.deployed || Number(record.engineVersion) !== Number(record.version)
 }
 
+/**
+ * 健康分级只按"是否已经产生后果"排序，不按数字大小：
+ * 消费线程停掉 → 后续部署全部不登记；放弃过 → 注册表确实可能缺记录；
+ * 有积压/兜底但没放弃 → 只是可见性抖动，正在自愈，用黄色提示即可。
+ */
+const health = computed(() => {
+  const d = diag.value
+  if (!d) return { tone: 'muted', message: '诊断接口不可用，无法确认自动登记状态' }
+  if (d.consumerStarted && !d.consumerAlive) {
+    return { tone: 'danger', message: '自动登记消费线程已停止，之后的部署不会再自动登记' }
+  }
+  if (d.giveUpTotal > 0) {
+    return {
+      tone: 'danger',
+      message: `已有 ${d.giveUpTotal} 条部署被放弃自动登记，注册表可能缺记录`
+    }
+  }
+  if (d.pendingCount > 0 || d.fallbackTotal > 0) {
+    return {
+      tone: 'warn',
+      message: `队列积压 ${d.pendingCount} 条，累计兜底 ${d.fallbackTotal} 次`
+    }
+  }
+  return { tone: 'ok', message: '自动登记正常' }
+})
+
+const consumerText = computed(() => {
+  const d = diag.value
+  if (!d) return '未知'
+  if (!d.consumerStarted) return '未启动'
+  return d.consumerAlive ? '运行中' : '已停止'
+})
+
 function fmt(value) {
   if (!value) return '—'
   const d = new Date(value)
@@ -314,6 +390,33 @@ async function load() {
     message.error(errorText(e))
   } finally {
     loading.value = false
+  }
+  // 诊断与列表互不依赖：诊断失败不该把列表一起判成失败
+  await loadDiag()
+}
+
+/** 诊断是辅助信息，失败时静默降级为"—"，不弹错误打断管理员操作 */
+async function loadDiag() {
+  try {
+    const res = await adminSubProcessApi.registrarDiagnostics()
+    diag.value = res && !res.error ? res : null
+  } catch (e) {
+    diag.value = null
+  }
+}
+
+function startDiagTimer() {
+  stopDiagTimer()
+  diagTimer = window.setInterval(() => {
+    // 标签页在后台时不必轮询，回来时 loadDiag 会补一次
+    if (!document.hidden) loadDiag()
+  }, DIAG_REFRESH_MS)
+}
+
+function stopDiagTimer() {
+  if (diagTimer) {
+    window.clearInterval(diagTimer)
+    diagTimer = null
   }
 }
 
@@ -465,7 +568,12 @@ async function syncFromEngine() {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  startDiagTimer()
+})
+
+onBeforeUnmount(stopDiagTimer)
 </script>
 
 <style scoped>
@@ -488,6 +596,63 @@ onMounted(load)
   margin: 0;
   color: rgba(0, 0, 0, 0.45);
   font-size: 13px;
+}
+
+.head-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.reg-health {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: default;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.reg-health .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+.reg-health .sep {
+  opacity: 0.45;
+}
+
+.reg-health.ok {
+  color: #389e0d;
+  background: #f6ffed;
+  border-color: #d9f7be;
+}
+
+.reg-health.warn {
+  color: #d46b08;
+  background: #fff7e6;
+  border-color: #ffe7ba;
+}
+
+.reg-health.danger {
+  color: #cf1322;
+  background: #fff1f0;
+  border-color: #ffccc7;
+}
+
+.reg-health.muted {
+  color: rgba(0, 0, 0, 0.45);
+  background: #fafafa;
+  border-color: #f0f0f0;
 }
 
 .mono {

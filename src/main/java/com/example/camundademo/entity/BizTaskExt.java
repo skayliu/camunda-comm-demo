@@ -15,6 +15,17 @@ public class BizTaskExt implements DbEntity, Serializable {
 
     public static final String STATUS_NORMAL = "NORMAL";
     public static final String STATUS_COMMUNICATING = "COMMUNICATING";
+    /** 前加签进行中：原任务被锁定，子轮次通过后解锁 */
+    public static final String STATUS_WAIT_PRE_SIGN = "WAIT_PRE_SIGN";
+    /** 后加签进行中：原意见已暂存，子轮次收口后真正 complete */
+    public static final String STATUS_WAIT_POST_SIGN = "WAIT_POST_SIGN";
+
+    /** 锁定的状态集合：这些状态下禁止 complete，由拦截器与 complete 监听器共同兜底 */
+    public static boolean isLockedStatus(String status) {
+        return STATUS_COMMUNICATING.equals(status)
+                || STATUS_WAIT_PRE_SIGN.equals(status)
+                || STATUS_WAIT_POST_SIGN.equals(status);
+    }
 
     protected String id;
     protected String taskId;

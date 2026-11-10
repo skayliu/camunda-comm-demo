@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.camundademo.persistence.BizSignRecordManager">
+
+    <resultMap id="bizSignRecordResultMap" type="com.example.camundademo.entity.BizSignRecord">
+        <id property="id" column="ID_" jdbcType="VARCHAR"/>
+        <result property="signRoundId" column="SIGN_ROUND_ID_" jdbcType="VARCHAR"/>
+        <result property="processInstanceId" column="PROC_INST_ID_" jdbcType="VARCHAR"/>
+        <result property="subProcessInstanceId" column="SUB_PROC_INST_ID_" jdbcType="VARCHAR"/>
+        <result property="sourceTaskId" column="SOURCE_TASK_ID_" jdbcType="VARCHAR"/>
+        <result property="sourceTaskDefKey" column="SOURCE_TASK_DEF_KEY_" jdbcType="VARCHAR"/>
+        <result property="sourceActivityInstanceId" column="SOURCE_ACT_INST_ID_" jdbcType="VARCHAR"/>
+        <result property="signType" column="SIGN_TYPE_" jdbcType="VARCHAR"/>
+        <result property="signMode" column="SIGN_MODE_" jdbcType="VARCHAR"/>
+        <result property="approveMode" column="APPROVE_MODE_" jdbcType="VARCHAR"/>
+        <result property="initiatorId" column="INITIATOR_ID_" jdbcType="VARCHAR"/>
+        <result property="addUserId" column="ADD_USER_ID_" jdbcType="VARCHAR"/>
+        <result property="addTaskId" column="ADD_TASK_ID_" jdbcType="VARCHAR"/>
+        <result property="addActivityInstanceId" column="ADD_ACT_INST_ID_" jdbcType="VARCHAR"/>
+        <result property="signStatus" column="SIGN_STATUS_" jdbcType="VARCHAR"/>
+        <result property="opinion" column="OPINION_" jdbcType="VARCHAR"/>
+        <result property="sequenceNo" column="SEQUENCE_NO_" jdbcType="INTEGER"/>
+        <result property="createTime" column="CREATE_TIME_" jdbcType="TIMESTAMP"/>
+        <result property="updateTime" column="UPDATE_TIME_" jdbcType="TIMESTAMP"/>
+        <result property="finishTime" column="FINISH_TIME_" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <insert id="insertBizSignRecord" parameterType="com.example.camundademo.entity.BizSignRecord">
+        INSERT INTO BIZ_SIGN_RECORD_ (
+            ID_, SIGN_ROUND_ID_, PROC_INST_ID_, SUB_PROC_INST_ID_, SOURCE_TASK_ID_,
+            SOURCE_TASK_DEF_KEY_, SOURCE_ACT_INST_ID_, SIGN_TYPE_, SIGN_MODE_, APPROVE_MODE_,
+            INITIATOR_ID_, ADD_USER_ID_, ADD_TASK_ID_, ADD_ACT_INST_ID_, SIGN_STATUS_,
+            OPINION_, SEQUENCE_NO_, CREATE_TIME_, UPDATE_TIME_, FINISH_TIME_
+        ) VALUES (
+            #{id, jdbcType=VARCHAR}, #{signRoundId, jdbcType=VARCHAR}, #{processInstanceId, jdbcType=VARCHAR},
+            #{subProcessInstanceId, jdbcType=VARCHAR}, #{sourceTaskId, jdbcType=VARCHAR},
+            #{sourceTaskDefKey, jdbcType=VARCHAR}, #{sourceActivityInstanceId, jdbcType=VARCHAR},
+            #{signType, jdbcType=VARCHAR}, #{signMode, jdbcType=VARCHAR}, #{approveMode, jdbcType=VARCHAR},
+            #{initiatorId, jdbcType=VARCHAR}, #{addUserId, jdbcType=VARCHAR}, #{addTaskId, jdbcType=VARCHAR},
+            #{addActivityInstanceId, jdbcType=VARCHAR}, #{signStatus, jdbcType=VARCHAR},
+            #{opinion, jdbcType=VARCHAR}, #{sequenceNo, jdbcType=INTEGER},
+            #{createTime, jdbcType=TIMESTAMP}, #{updateTime, jdbcType=TIMESTAMP}, #{finishTime, jdbcType=TIMESTAMP}
+        )
+    </insert>
+
+    <update id="updateBizSignRecord" parameterType="com.example.camundademo.entity.BizSignRecord">
+        UPDATE BIZ_SIGN_RECORD_
+        SET ADD_TASK_ID_ = #{addTaskId, jdbcType=VARCHAR},
+            ADD_ACT_INST_ID_ = #{addActivityInstanceId, jdbcType=VARCHAR},
+            SIGN_STATUS_ = #{signStatus, jdbcType=VARCHAR},
+            OPINION_ = #{opinion, jdbcType=VARCHAR},
+            UPDATE_TIME_ = #{updateTime, jdbcType=TIMESTAMP},
+            FINISH_TIME_ = #{finishTime, jdbcType=TIMESTAMP}
+        WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </update>
+
+    <delete id="deleteBizSignRecord" parameterType="string">
+        DELETE FROM BIZ_SIGN_RECORD_ WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </delete>
+
+    <select id="selectBizSignRecord" parameterType="string" resultMap="bizSignRecordResultMap">
+        SELECT * FROM BIZ_SIGN_RECORD_ WHERE ID_ = #{id, jdbcType=VARCHAR}
+    </select>
+
+    <select id="selectBySourceTaskId" parameterType="string" resultMap="bizSignRecordResultMap">
+        SELECT * FROM BIZ_SIGN_RECORD_ WHERE SOURCE_TASK_ID_ = #{sourceTaskId, jdbcType=VARCHAR}
+        ORDER BY CREATE_TIME_ ASC
+    </select>
+
+    <select id="selectByProcessInstanceId" parameterType="string" resultMap="bizSignRecordResultMap">
+        SELECT * FROM BIZ_SIGN_RECORD_ WHERE PROC_INST_ID_ = #{processInstanceId, jdbcType=VARCHAR}
+        ORDER BY CREATE_TIME_ ASC
+    </select>
+
+    <select id="selectByRoundId" parameterType="string" resultMap="bizSignRecordResultMap">
+        SELECT * FROM BIZ_SIGN_RECORD_ WHERE SIGN_ROUND_ID_ = #{signRoundId, jdbcType=VARCHAR}
+        ORDER BY SEQUENCE_NO_ ASC
+    </select>
+
+    <select id="selectByAddTaskId" parameterType="string" resultMap="bizSignRecordResultMap">
+        SELECT * FROM BIZ_SIGN_RECORD_ WHERE ADD_TASK_ID_ = #{addTaskId, jdbcType=VARCHAR}
+    </select>
+
+    <!-- 一轮加签对应多条记录（加几个人就有几条），此语句必然多行；
+         调用方取首行，这里用 CREATE_TIME_ + ID_ 固定顺序，避免不同数据库返回顺序不一致 -->
+    <select id="selectBySubProcessInstanceId" parameterType="string" resultMap="bizSignRecordResultMap">
+        SELECT * FROM BIZ_SIGN_RECORD_
+        WHERE SUB_PROC_INST_ID_ = #{subProcessInstanceId, jdbcType=VARCHAR}
+        ORDER BY CREATE_TIME_, ID_
+    </select>
+
+    <select id="countActiveByRoundAndUser" parameterType="map" resultType="long">
+        SELECT COUNT(*) FROM BIZ_SIGN_RECORD_
+        WHERE SIGN_ROUND_ID_ = #{signRoundId, jdbcType=VARCHAR}
+          AND ADD_USER_ID_ = #{addUserId, jdbcType=VARCHAR}
+          AND SIGN_STATUS_ IN ('PENDING', 'APPROVED')
+    </select>
+
+    <select id="countPendingBySourceTask" parameterType="string" resultType="long">
+        SELECT COUNT(*) FROM BIZ_SIGN_RECORD_
+        WHERE SOURCE_TASK_ID_ = #{sourceTaskId, jdbcType=VARCHAR}
+          AND SIGN_STATUS_ = 'PENDING'
+    </select>
+
+    <update id="finishRound" parameterType="map">
+        UPDATE BIZ_SIGN_RECORD_
+        SET SIGN_STATUS_ = #{status, jdbcType=VARCHAR},
+            OPINION_ = #{opinion, jdbcType=VARCHAR},
+            UPDATE_TIME_ = #{finishTime, jdbcType=TIMESTAMP},
+            FINISH_TIME_ = #{finishTime, jdbcType=TIMESTAMP}
+        WHERE SIGN_ROUND_ID_ = #{signRoundId, jdbcType=VARCHAR}
+          AND SIGN_STATUS_ = 'PENDING'
+    </update>
+
+    <update id="cancelPendingBySourceTask" parameterType="map">
+        UPDATE BIZ_SIGN_RECORD_
+        SET SIGN_STATUS_ = 'CANCELLED',
+            UPDATE_TIME_ = #{finishTime, jdbcType=TIMESTAMP},
+            FINISH_TIME_ = #{finishTime, jdbcType=TIMESTAMP}
+        WHERE SOURCE_TASK_ID_ = #{sourceTaskId, jdbcType=VARCHAR}
+          AND SIGN_STATUS_ = 'PENDING'
+    </update>
+
+</mapper>

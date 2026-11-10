@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+                  id="Definitions_add_sign_parallel"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+
+    <!--
+      加签子轮次 · 并行版。
+      由前加签 / 后加签在运行期按“发起人选择并行”启动。
+      完成条件（全部通过 / 任一通过）由管理员在部署期配置，通过变量 addSignApproveMode 落值，
+      发起人只能在弹层选择并行/串行，不能改完成条件。
+      任一加签人驳回时由后端把 addSignRejected 置为 true，completionCondition 立即满足，
+      引擎会销毁其余活动实例 —— 这就是“任一驳回即整轮不通过”。
+    -->
+    <bpmn:process id="addSignParallel" name="加签子轮次（并行）" isExecutable="true"
+                  camunda:historyTimeToLive="180">
+        <bpmn:extensionElements>
+            <camunda:executionListener event="end" delegateExpression="${addSignRoundEndListener}"/>
+        </bpmn:extensionElements>
+
+        <bpmn:startEvent id="signStart" name="开始">
+            <bpmn:outgoing>signFlow1</bpmn:outgoing>
+        </bpmn:startEvent>
+
+        <bpmn:userTask id="addSignTask" name="加签审批" camunda:assignee="${addSignUser}">
+            <bpmn:incoming>signFlow1</bpmn:incoming>
+            <bpmn:outgoing>signFlow2</bpmn:outgoing>
+            <bpmn:multiInstanceLoopCharacteristics isSequential="false"
+                                                 camunda:collection="${addSignUsers}"
+                                                 camunda:elementVariable="addSignUser">
+                <bpmn:completionCondition xsi:type="bpmn:tFormalExpression">${addSignRejected == true || nrOfCompletedInstances >= (addSignApproveMode == 'ANY' ? 1 : nrOfInstances)}</bpmn:completionCondition>
+            </bpmn:multiInstanceLoopCharacteristics>
+        </bpmn:userTask>
+
+        <bpmn:exclusiveGateway id="signResultGateway" name="轮次结果" default="signFlowPass">
+            <bpmn:incoming>signFlow2</bpmn:incoming>
+            <bpmn:outgoing>signFlowReject</bpmn:outgoing>
+            <bpmn:outgoing>signFlowPass</bpmn:outgoing>
+        </bpmn:exclusiveGateway>
+
+        <bpmn:endEvent id="signRejectedEnd" name="轮次驳回">
+            <bpmn:incoming>signFlowReject</bpmn:incoming>
+        </bpmn:endEvent>
+
+        <bpmn:endEvent id="signPassedEnd" name="轮次通过">
+            <bpmn:incoming>signFlowPass</bpmn:incoming>
+        </bpmn:endEvent>
+
+        <bpmn:sequenceFlow id="signFlow1" sourceRef="signStart" targetRef="addSignTask"/>
+        <bpmn:sequenceFlow id="signFlow2" sourceRef="addSignTask" targetRef="signResultGateway"/>
+        <bpmn:sequenceFlow id="signFlowReject" name="有驳回" sourceRef="signResultGateway" targetRef="signRejectedEnd">
+            <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${addSignRejected == true}</bpmn:conditionExpression>
+        </bpmn:sequenceFlow>
+        <bpmn:sequenceFlow id="signFlowPass" name="通过" sourceRef="signResultGateway" targetRef="signPassedEnd"/>
+    </bpmn:process>
+
+    <bpmndi:BPMNDiagram id="BPMNDiagram_add_sign_parallel">
+        <bpmndi:BPMNPlane id="BPMNPlane_add_sign_parallel" bpmnElement="addSignParallel">
+            <bpmndi:BPMNShape id="Shape_signStart" bpmnElement="signStart">
+                <dc:Bounds x="60" y="120" width="36" height="36"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_addSignTask" bpmnElement="addSignTask">
+                <dc:Bounds x="150" y="98" width="110" height="80"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_signResultGateway" bpmnElement="signResultGateway" isMarkerVisible="true">
+                <dc:Bounds x="320" y="113" width="50" height="50"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_signRejectedEnd" bpmnElement="signRejectedEnd">
+                <dc:Bounds x="450" y="50" width="36" height="36"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNShape id="Shape_signPassedEnd" bpmnElement="signPassedEnd">
+                <dc:Bounds x="450" y="190" width="36" height="36"/>
+            </bpmndi:BPMNShape>
+            <bpmndi:BPMNEdge id="Edge_signFlow1" bpmnElement="signFlow1">
+                <di:waypoint x="96" y="138"/><di:waypoint x="150" y="138"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Edge_signFlow2" bpmnElement="signFlow2">
+                <di:waypoint x="260" y="138"/><di:waypoint x="320" y="138"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Edge_signFlowReject" bpmnElement="signFlowReject">
+                <di:waypoint x="370" y="138"/><di:waypoint x="410" y="138"/><di:waypoint x="410" y="68"/><di:waypoint x="450" y="68"/>
+            </bpmndi:BPMNEdge>
+            <bpmndi:BPMNEdge id="Edge_signFlowPass" bpmnElement="signFlowPass">
+                <di:waypoint x="370" y="138"/><di:waypoint x="410" y="138"/><di:waypoint x="410" y="208"/><di:waypoint x="450" y="208"/>
+            </bpmndi:BPMNEdge>
+        </bpmndi:BPMNPlane>
+    </bpmndi:BPMNDiagram>
+
+</bpmn:definitions>

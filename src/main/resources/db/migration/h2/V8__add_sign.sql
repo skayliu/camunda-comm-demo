@@ -1,0 +1,45 @@
+-- ============================================================================
+-- V8 加签（前加签 / 后加签 / 并加签）· H2 2.2
+--
+-- 加签不往 ACT_RU_TASK 插记录：并加签在当前多实例节点扩容，
+-- 前/后加签另起一个加签子流程（独立流程实例，按 SIGN_ROUND_ID_ 归组）。
+-- 本表只存“谁在哪个任务上加了谁、这一轮结果如何”，流程推进由引擎负责。
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS BIZ_SIGN_RECORD_ (
+    ID_ VARCHAR(64) NOT NULL,
+    -- 同一轮加签共享（前/后加签的子轮次、并加签的一次扩容）
+    SIGN_ROUND_ID_ VARCHAR(64) NOT NULL,
+    PROC_INST_ID_ VARCHAR(64) NOT NULL,
+    -- 前/后加签的子流程实例；并加签为空
+    SUB_PROC_INST_ID_ VARCHAR(64),
+    SOURCE_TASK_ID_ VARCHAR(64) NOT NULL,
+    SOURCE_TASK_DEF_KEY_ VARCHAR(128),
+    -- 发起人自己那一张内部任务的 activityInstanceId（多实例节点只锁这一张）
+    SOURCE_ACT_INST_ID_ VARCHAR(64),
+    -- PARALLEL 并加签 / PRE 前加签 / POST 后加签
+    SIGN_TYPE_ VARCHAR(32) NOT NULL,
+    -- PARALLEL 多人并行 / SEQUENTIAL 多人串行（仅前/后加签）
+    SIGN_MODE_ VARCHAR(32),
+    -- ALL 全部通过 / ANY 任一通过（管理员配置快照，发起人不可改）
+    APPROVE_MODE_ VARCHAR(16),
+    INITIATOR_ID_ VARCHAR(64) NOT NULL,
+    ADD_USER_ID_ VARCHAR(64) NOT NULL,
+    ADD_TASK_ID_ VARCHAR(64),
+    -- 并加签新实例的 activityInstanceId，减签时按它 cancelActivityInstance
+    ADD_ACT_INST_ID_ VARCHAR(64),
+    -- PENDING / APPROVED / REJECTED / CANCELLED
+    SIGN_STATUS_ VARCHAR(32) DEFAULT 'PENDING',
+    OPINION_ VARCHAR(2000),
+    SEQUENCE_NO_ INT,
+    CREATE_TIME_ TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UPDATE_TIME_ TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FINISH_TIME_ TIMESTAMP,
+    CONSTRAINT PK_BIZ_SIGN_RECORD_ PRIMARY KEY (ID_)
+);
+
+CREATE INDEX IF NOT EXISTS IDX_BIZ_SIGN_SOURCE ON BIZ_SIGN_RECORD_ (SOURCE_TASK_ID_, SIGN_STATUS_);
+CREATE INDEX IF NOT EXISTS IDX_BIZ_SIGN_PROC ON BIZ_SIGN_RECORD_ (PROC_INST_ID_);
+CREATE INDEX IF NOT EXISTS IDX_BIZ_SIGN_ROUND ON BIZ_SIGN_RECORD_ (SIGN_ROUND_ID_);
+CREATE INDEX IF NOT EXISTS IDX_BIZ_SIGN_ADD_TASK ON BIZ_SIGN_RECORD_ (ADD_TASK_ID_);
+CREATE INDEX IF NOT EXISTS IDX_BIZ_SIGN_SUB_PROC ON BIZ_SIGN_RECORD_ (SUB_PROC_INST_ID_);
