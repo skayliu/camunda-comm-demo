@@ -19,12 +19,12 @@
       show-icon
       :message="`${view.range.label}内没有传阅或承办记录`"
       description="产生传阅、阅办后这里会自动出现统计；可切换到「全部」查看历史数据。"
-      style="margin-bottom: 16px; border-radius: 10px"
+      style="margin-bottom: 16px"
     />
 
     <div class="kpi-grid">
       <div class="stat-card">
-        <div class="stat-icon" style="background: #e6f4ff; color: #1677ff">
+        <div class="stat-icon" data-tone="brand">
           <MailOutlined />
         </div>
         <div>
@@ -33,7 +33,7 @@
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon" style="background: #fff7e6; color: #fa8c16">
+        <div class="stat-icon" data-tone="warning">
           <EyeOutlined />
         </div>
         <div>
@@ -42,7 +42,7 @@
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon" style="background: #f6ffed; color: #52c41a">
+        <div class="stat-icon" data-tone="success">
           <SolutionOutlined />
         </div>
         <div>
@@ -51,7 +51,7 @@
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon" style="background: #f0f5ff; color: #2f54eb">
+        <div class="stat-icon" data-tone="indigo">
           <CheckCircleOutlined />
         </div>
         <div>
@@ -60,18 +60,18 @@
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon" style="background: #fff1f0; color: #cf1322">
+        <div class="stat-icon" data-tone="danger">
           <WarningOutlined />
         </div>
         <div>
-          <div class="stat-value" :style="{ color: view.summary.handleOverdue ? '#cf1322' : null }">
+          <div class="stat-value" :style="{ color: view.summary.handleOverdue ? 'var(--danger)' : null }">
             {{ num(view.summary.handleOverdue) }}
           </div>
           <div class="stat-label">逾期未办 · 占 {{ pct(view.summary.handleOverdueRate) }}</div>
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon" style="background: #f9f0ff; color: #722ed1">
+        <div class="stat-icon" data-tone="purple">
           <FieldTimeOutlined />
         </div>
         <div>
@@ -137,11 +137,11 @@
                 <a-progress
                   :percent="Math.min(record.readRate, 100)"
                   size="small"
-                  :stroke-color="record.readRate >= 80 ? '#52c41a' : record.readRate >= 50 ? '#faad14' : '#ff4d4f'"
+                  :stroke-color="record.readRate >= 80 ? 'var(--success)' : record.readRate >= 50 ? 'var(--warning)' : 'var(--danger)'"
                 />
               </template>
               <template v-else-if="column.key === 'unread'">
-                <span :style="record.unread ? { color: '#fa8c16', fontWeight: 600 } : null">{{ record.unread }}</span>
+                <span :style="record.unread ? { color: 'var(--warning)', fontWeight: 600 } : null">{{ record.unread }}</span>
               </template>
             </template>
             <template #emptyText><a-empty description="暂无传阅记录" /></template>
@@ -174,7 +174,7 @@
                     <div class="muted mono">{{ record.userId }}</div>
                   </template>
                   <template v-else-if="column.key === 'unread'">
-                    <span :style="record.unread ? { color: '#fa8c16', fontWeight: 600 } : null">{{ record.unread }}</span>
+                    <span :style="record.unread ? { color: 'var(--warning)', fontWeight: 600 } : null">{{ record.unread }}</span>
                   </template>
                 </template>
                 <template #emptyText><a-empty description="暂无数据" /></template>
@@ -257,13 +257,13 @@
                 <div class="muted mono">{{ record.assignee }}</div>
               </template>
               <template v-else-if="column.key === 'overdue'">
-                <span :style="record.overdue ? { color: '#cf1322', fontWeight: 600 } : null">{{ record.overdue }}</span>
+                <span :style="record.overdue ? { color: 'var(--danger)', fontWeight: 600 } : null">{{ record.overdue }}</span>
               </template>
               <template v-else-if="column.key === 'doneRate'">
                 {{ pct(record.doneRate) }}
               </template>
               <template v-else-if="column.key === 'overdueRate'">
-                <span :style="record.overdueRate ? { color: '#cf1322' } : null">{{ pct(record.overdueRate) }}</span>
+                <span :style="record.overdueRate ? { color: 'var(--danger)' } : null">{{ pct(record.overdueRate) }}</span>
               </template>
               <template v-else-if="column.key === 'avgHours'">
                 {{ fmtHours(record.avgHours) }}
@@ -463,7 +463,7 @@ onMounted(load)
   gap: 6px;
   min-height: 140px;
   padding: 8px 2px 0;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .trend-col {
@@ -491,17 +491,17 @@ onMounted(load)
 }
 
 .bar-cc {
-  background: #1677ff;
+  background: var(--brand);
 }
 
 .bar-done {
-  background: #52c41a;
+  background: var(--success);
 }
 
 .trend-label {
   margin-top: 6px;
   font-size: 11px;
-  color: var(--text-sub);
+  color: var(--text-secondary);
   white-space: nowrap;
   transform: scale(0.92);
 }
@@ -511,7 +511,7 @@ onMounted(load)
   align-items: center;
   gap: 5px;
   font-size: 12px;
-  color: var(--text-sub);
+  color: var(--text-secondary);
 }
 
 .dot {
@@ -522,11 +522,11 @@ onMounted(load)
 }
 
 .dot-cc {
-  background: #1677ff;
+  background: var(--brand);
 }
 
 .dot-done {
-  background: #52c41a;
+  background: var(--success);
 }
 
 .pair {
@@ -537,7 +537,7 @@ onMounted(load)
 }
 
 .pair-arrow {
-  color: var(--text-sub);
+  color: var(--text-secondary);
 }
 
 @media (max-width: 768px) {

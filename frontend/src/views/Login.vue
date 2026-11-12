@@ -34,6 +34,33 @@
     </div>
 
     <div class="login-panel">
+      <a-dropdown placement="bottomRight" :trigger="['click']" class="login-theme-toggle">
+        <button
+          class="wb-icon-btn"
+          type="button"
+          aria-label="切换主题外观"
+          :title="`外观：${currentThemeLabel}`"
+        >
+          <BgColorsOutlined />
+        </button>
+        <template #overlay>
+          <a-menu :selected-keys="[themeMode]" class="theme-menu" @click="onThemeClick">
+            <a-menu-item
+              v-for="opt in themeOptions"
+              :key="opt.key"
+              :class="{ 'is-current': themeMode === opt.key }"
+            >
+              <span class="theme-option">
+                <span class="theme-menu-title">
+                  <span class="theme-menu-label">{{ opt.label }}</span>
+                  <span class="theme-menu-hint">{{ opt.hint }}</span>
+                </span>
+                <CheckOutlined v-if="themeMode === opt.key" class="theme-check" />
+              </span>
+            </a-menu-item>
+          </a-menu>
+        </template>
+      </a-dropdown>
       <div class="login-card">
         <h2>登录</h2>
         <p class="login-sub">使用流程账号登录，进入你的流程审批中心</p>
@@ -103,13 +130,23 @@
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { LockOutlined, UserOutlined } from '@ant-design/icons-vue'
+import { BgColorsOutlined, CheckOutlined, LockOutlined, UserOutlined } from '@ant-design/icons-vue'
 import { authApi, errorText } from '../api'
+import { useTheme } from '../composables/useTheme'
 
 const route = useRoute()
 const router = useRouter()
+
+const { mode: themeMode, options: themeOptions, setMode } = useTheme()
+const currentThemeLabel = computed(
+  () => (themeOptions.find((opt) => opt.key === themeMode.value) || {}).label || ''
+)
+
+function onThemeClick({ key }) {
+  setMode(key)
+}
 
 const demoUsers = ['applicant', 'manager', 'finance', 'alice', 'bob', 'carol']
 const form = reactive({ user: 'manager', password: 'demo' })

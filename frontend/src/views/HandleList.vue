@@ -8,7 +8,7 @@
       <a-button type="primary" :loading="loading" @click="load">刷新</a-button>
     </div>
 
-    <a-card :bordered="false" style="border-radius: 10px">
+    <a-card :bordered="false">
       <div class="toolbar">
         <a-input-search v-model:value="keyword" placeholder="搜索标题、办理要求" allow-clear style="max-width: 300px" @search="search" />
         <a-segmented v-model:value="status" :options="statusOptions" @change="search" />
@@ -24,7 +24,7 @@
             <div v-if="record.instruction" class="muted" style="font-size: 12px">要求：{{ record.instruction }}</div>
           </template>
           <template v-else-if="column.key === 'deadline'">
-            <span :style="record.overdue ? { color: '#cf1322' } : null">{{ fmt(record.deadline) }}</span>
+            <span :style="record.overdue ? { color: 'var(--danger)' } : null">{{ fmt(record.deadline) }}</span>
           </template>
           <template v-else-if="column.key === 'status'">
             <a-tag v-if="record.revoked" color="default">已撤回</a-tag>

@@ -190,7 +190,7 @@ async function submit() {
 <style scoped>
 .sign-hint {
   margin-top: 6px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
   font-size: 12px;
   line-height: 1.6;
 }

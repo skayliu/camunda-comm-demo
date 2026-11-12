@@ -11,7 +11,7 @@
       </a-button>
     </div>
 
-    <a-card :bordered="false" style="border-radius: 10px">
+    <a-card :bordered="false">
       <div class="toolbar">
         <a-input-search
           v-model:value="keyword"
@@ -130,7 +130,7 @@
         <DetailSection title="审批意见" :style="{ marginTop: transfers.length ? '' : '20px' }">
           <div v-if="current.comments && current.comments.length" class="comm-bubble">
             <div v-for="c in current.comments" :key="c.id" style="margin-bottom: 8px">
-              <div style="color: rgba(0, 0, 0, 0.45); font-size: 12px">
+              <div style="color: var(--text-tertiary); font-size: 12px">
                 {{ c.userId }} · {{ fmt(c.time) }}
               </div>
               {{ c.message }}

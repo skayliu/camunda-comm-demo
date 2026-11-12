@@ -1,13 +1,8 @@
-:root {
-  --brand: #1677ff;
-  --brand-dark: #0f4fd1;
-  --layout-bg: #f0f2f5;
-  --sider-bg: #001529;
-  --sider-bg-light: #0c2135;
-  --text-main: rgba(0, 0, 0, 0.88);
-  --text-sub: rgba(0, 0, 0, 0.45);
-  --border: #eef0f3;
-}
+/* ============================================================
+ * 全局样式
+ * 颜色一律走 tokens.css 的语义变量，禁止在此写死色值，
+ * 否则深色模式会出现「一块白、一块黑」。
+ * ============================================================ */
 
 * {
   box-sizing: border-box;
@@ -23,94 +18,220 @@ body,
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-  background: var(--layout-bg);
-  color: var(--text-main);
+  font-size: 14px;
+  line-height: 1.5715;
+  background: var(--bg-body);
+  color: var(--text);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 切换主题时只过渡背景与文字，避免整棵树的 transition 造成卡顿 */
+html.theme-switching body {
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+::selection {
+  background: var(--brand-soft);
+  color: var(--text-strong);
+}
+
+/* 键盘焦点必须可见：鼠标点击不出现，Tab 切换才出现 */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* 细滚动条，深色下不至于出现一条亮白色轨道 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: var(--radius-pill);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  border: 3px solid transparent;
+  background-clip: content-box;
 }
 
 /* ===== 布局 ===== */
 .wb-layout {
   min-height: 100vh;
+  background: var(--bg-body);
 }
 
 .wb-sider {
-  background: var(--sider-bg) !important;
-  box-shadow: 2px 0 8px rgba(29, 35, 41, 0.05);
+  background: linear-gradient(180deg, var(--sider-bg) 0%, var(--sider-bg-end) 100%) !important;
+  box-shadow: var(--sider-shadow);
+  border-right: 1px solid var(--sider-border);
   z-index: 20;
 }
 
+.wb-sider .ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+}
+
 .wb-logo {
-  height: 56px;
+  height: 60px;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 0 18px;
-  color: #fff;
+  color: var(--sider-text-strong);
   overflow: hidden;
+  border-bottom: 1px solid var(--sider-border);
+  margin-bottom: 8px;
 }
 
 .wb-logo-mark {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #1677ff, #57a6ff);
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, #3b8eff 0%, #1677ff 55%, #0958d9 100%);
+  box-shadow: 0 4px 12px rgba(22, 119, 255, 0.35);
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 700;
   font-size: 14px;
+  color: #fff;
   flex: 0 0 auto;
 }
 
 .wb-logo-text {
   font-size: 15px;
   font-weight: 600;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
   white-space: nowrap;
+  line-height: 1.3;
 }
 
 .wb-logo-sub {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
-  margin-top: 2px;
+  color: var(--sider-text);
+  opacity: 0.65;
+  letter-spacing: 0.4px;
   white-space: nowrap;
 }
 
 .wb-sider .ant-menu {
   background: transparent;
   border-inline-end: none !important;
+  padding-bottom: 12px;
 }
 
 .wb-sider .ant-menu-item {
-  margin: 4px 10px;
+  margin: 2px 10px;
   width: calc(100% - 20px);
-  border-radius: 6px;
-  color: rgba(255, 255, 255, 0.72);
+  border-radius: var(--radius-md);
+  color: var(--sider-text) !important;
+  font-size: 13.5px;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.wb-sider .ant-menu-item .anticon {
+  font-size: 16px;
 }
 
 .wb-sider .ant-menu-item-selected {
-  background: var(--brand) !important;
-  color: #fff !important;
+  background: linear-gradient(90deg, var(--brand) 0%, #3b8eff 100%) !important;
+  color: var(--text-on-brand) !important;
+  box-shadow: 0 4px 12px rgba(22, 119, 255, 0.28);
 }
 
 .wb-sider .ant-menu-item:hover {
-  color: #fff !important;
-  background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--sider-text-strong) !important;
+  background: var(--sider-hover) !important;
 }
 
 .wb-sider .ant-menu-item-selected:hover {
-  background: var(--brand) !important;
+  background: linear-gradient(90deg, var(--brand) 0%, #3b8eff 100%) !important;
 }
 
-.wb-header {
-  background: #fff;
+.wb-sider .ant-menu-divider {
+  border-color: var(--sider-border);
+  margin: 8px 18px;
+}
+
+/* ===== 收起态（64px）：logo 与菜单图标都要落在侧栏中心 ===== */
+/* 原 logo 是 padding 0 18px + 30px 标志，64 - 36 = 28px 放不下 30px 的方块，
+   flex 溢出后被 overflow:hidden 从右侧裁掉，视觉上整体偏左；收起时改为纯居中 */
+.wb-sider.ant-layout-sider-collapsed .wb-logo {
+  padding: 0;
+  gap: 0;
+  justify-content: center;
+}
+
+/* antd 收起态用 padding-inline: calc(50% - 8px) 定位图标，一旦标题内容仍有残留宽度
+   （菜单名、角标、委托中胶囊），图标就会被挤到左侧。这里改成整行 flex 居中，
+   图标永远是唯一在流内的元素。
+   菜单项自身也用 margin-inline:auto + 定宽锁住：64px 侧栏里 44px 项正好居中，
+   不再依赖 padding 的百分比计算，避免 antd 改写 padding 后再次偏左 */
+.wb-sider.ant-layout-sider-collapsed .ant-menu-inline-collapsed {
+  width: 100%;
+}
+
+.wb-sider.ant-layout-sider-collapsed .ant-menu-inline-collapsed > .ant-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 44px;
+  margin-inline: auto;
+  padding: 0 !important;
+}
+
+.wb-sider.ant-layout-sider-collapsed .ant-menu-inline-collapsed > .ant-menu-item .ant-menu-item-icon,
+.wb-sider.ant-layout-sider-collapsed .ant-menu-inline-collapsed > .ant-menu-item .anticon {
+  margin: 0 !important;
+  inset-inline-start: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wb-sider.ant-layout-sider-collapsed .ant-menu-inline-collapsed > .ant-menu-item .ant-menu-title-content {
+  display: none;
+}
+
+.wb-sider.ant-layout-sider-collapsed .ant-menu-inline-collapsed > .ant-menu-item .anticon {
+  margin: 0;
+  line-height: 1;
+}
+
+/* 毛玻璃顶栏：背景必须压过 antd Layout 默认的深色 headerBg，
+   否则浅色模式下会出现「深色顶栏 + 深色文字」，面包屑与用户名直接看不见 */
+.ant-layout-header.wb-header {
+  background: var(--header-bg) !important;
+  backdrop-filter: saturate(180%) blur(12px);
+  -webkit-backdrop-filter: saturate(180%) blur(12px);
   padding: 0 20px;
-  height: 56px;
-  line-height: 56px;
+  height: 60px;
+  line-height: 60px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  box-shadow: 0 1px 4px rgba(0, 21, 41, 0.06);
+  gap: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--header-border);
   position: sticky;
   top: 0;
   z-index: 10;
@@ -118,107 +239,231 @@ body {
 
 .wb-header-left {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
-  gap: 12px;
-  font-size: 14px;
-  color: var(--text-sub);
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13.5px;
+  color: var(--text-tertiary);
 }
 
 .wb-header-left .crumb-current {
-  color: var(--text-main);
-  font-weight: 500;
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+/* 面包屑上一级用 secondary：tertiary 在浅色白底上只有 2.6:1，读起来发虚 */
+.wb-header-left .crumb-home {
+  color: var(--text-secondary);
 }
 
 .wb-header-right {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 14px;
+  gap: 6px;
+}
+
+/* 顶栏图标按钮：统一成方形热区，避免只有 16px 图标本身可点 */
+.wb-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.wb-icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-strong);
+}
+
+.wb-icon-btn.is-active {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.wb-icon-btn:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
 }
 
 .wb-user {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
+  min-width: 0;
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
-  transition: background 0.2s;
+  padding: 4px 8px 4px 4px;
+  border-radius: var(--radius-pill);
+  transition: background-color var(--dur) var(--ease);
 }
 
 .wb-user:hover {
-  background: #f5f7fa;
+  background: var(--bg-hover);
 }
 
 .wb-user-meta {
-  line-height: 1.2;
+  min-width: 0;
+  line-height: 1.25;
   text-align: left;
 }
 
 .wb-user-name {
   font-size: 13px;
-  font-weight: 500;
-  color: var(--text-main);
+  font-weight: 600;
+  color: var(--text-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .wb-user-role {
   font-size: 11px;
-  color: var(--text-sub);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .wb-content {
-  padding: 16px;
+  padding: 20px;
+  background: var(--bg-body);
+}
+
+/* 主题菜单：当前项加粗 + 勾选图标，不只靠颜色区分 */
+.theme-menu .ant-dropdown-menu-item,
+.theme-menu.ant-menu-vertical .ant-menu-item {
+  height: auto;
+  line-height: 1.4;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.theme-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-width: 168px;
+}
+
+.theme-check {
+  color: var(--brand);
+  font-size: 13px;
+  flex: 0 0 auto;
+}
+
+.theme-menu-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.35;
+}
+
+.theme-menu-label {
+  font-size: 13px;
+  color: var(--text-strong);
+}
+
+.theme-menu-hint {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+.theme-menu .ant-menu-item.is-current .theme-menu-label {
+  color: var(--brand);
+  font-weight: 600;
 }
 
 /* ===== 页面通用 ===== */
+.page {
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
 .page-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   flex-wrap: wrap;
 }
 
 .page-title {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 21px;
+  font-weight: 650;
   letter-spacing: 0.2px;
+  color: var(--text-strong);
+  line-height: 1.35;
 }
 
 .page-desc {
-  margin: 4px 0 0;
+  margin: 5px 0 0;
   font-size: 13px;
-  color: var(--text-sub);
+  /* 承载说明信息，用 secondary：tertiary(#98a2b3) 在浅色白底上只有 2.3:1，
+     13px 正文读起来发虚；tertiary 只留给图标、分隔符这类纯装饰 */
+  color: var(--text-secondary);
 }
 
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 14px;
+  margin-bottom: 18px;
 }
 
 .stat-card {
-  background: #fff;
-  border-radius: 10px;
-  padding: 16px 18px;
+  position: relative;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-lg);
+  padding: 18px 18px;
   display: flex;
   align-items: center;
   gap: 14px;
   border: 1px solid var(--border);
-  transition: box-shadow 0.2s, transform 0.2s;
+  box-shadow: var(--shadow-xs);
+  overflow: hidden;
+  transition: box-shadow var(--dur) var(--ease), transform var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+
+/* 左上角一条极淡的品牌色，让卡片有方向感而不喧宾夺主 */
+.stat-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--brand), transparent 70%);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
 }
 
 .stat-card:hover {
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
-  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+  border-color: var(--border-strong);
+}
+
+.stat-card:hover::before {
+  opacity: 1;
 }
 
 .stat-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -226,17 +471,115 @@ body {
   flex: 0 0 auto;
 }
 
-.stat-value {
-  font-size: 24px;
+/* 统计卡片配色：浅色是淡底 + 饱和图标色，深色是低饱和底 + 提亮图标色 */
+.stat-icon[data-tone='brand'] {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+.stat-icon[data-tone='teal'] {
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+.stat-icon[data-tone='purple'] {
+  background: var(--purple-soft);
+  color: var(--purple);
+}
+.stat-icon[data-tone='warning'] {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.stat-icon[data-tone='success'] {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.stat-icon[data-tone='indigo'] {
+  background: var(--indigo-soft);
+  color: var(--indigo);
+}
+.stat-icon[data-tone='danger'] {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* 加签说明：左侧色条 + 淡底，长文本换行不断词 */
+.sign-opinion {
+  margin-top: 6px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text);
+  background: var(--bg-hover);
+  border-left: 2px solid var(--border-strong);
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 并加签在单实例节点上不隐藏而是置灰：右侧标出「单实例不可用」，
+   让「有能力但当前用不上」和「功能缺失」看起来不一样。
+   颜色全部走 token，浅深两态保持同一套灰阶，而不是 antd 默认的 rgba 半透明黑。
+   注意下拉菜单项的实际类名是 .ant-dropdown-menu-item（不是 .ant-menu-item），
+   两种都写上，避免换容器后样式失效 */
+.sign-menu-parallel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sign-menu-parallel.ant-dropdown-menu-item-disabled,
+.sign-menu-parallel.ant-menu-item-disabled {
+  color: var(--text-disabled-readable) !important;
+  cursor: not-allowed;
+}
+
+.sign-menu-note {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--text-disabled-readable);
+  background: var(--bg-hover);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  white-space: nowrap;
+}
+
+/* 禁用态下备注也压到同一档灰，避免「主文案灰、标签亮」的割裂 */
+.sign-menu-parallel.ant-dropdown-menu-item-disabled .sign-menu-note,
+.sign-menu-parallel.ant-menu-item-disabled .sign-menu-note {
+  color: var(--text-disabled-readable);
+  background: transparent;
+}
+
+/* 卡片：统一用细阴影托起，避免白卡直接铺在灰底上显得平 */
+.ant-card {
+  box-shadow: var(--shadow-xs);
+}
+
+.ant-card:not(.ant-card-bordered) {
+  border: 1px solid var(--border-subtle);
+}
+
+.ant-card-head {
+  border-bottom-color: var(--border-subtle);
   font-weight: 600;
-  line-height: 1.1;
+}
+
+.stat-value {
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 1.05;
+  color: var(--text-strong);
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
 }
 
 .stat-label {
-  font-size: 12px;
-  color: var(--text-sub);
-  margin-top: 4px;
+  font-size: 12.5px;
+  /* 统计卡标签是信息本身（不是装饰），12.5px 且颜色偏浅会读不清 */
+  color: var(--text-secondary);
+  margin-top: 5px;
 }
 
 .toolbar {
@@ -245,7 +588,7 @@ body {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 .table-title {
@@ -256,16 +599,19 @@ body {
 
 .table-title-main {
   font-weight: 500;
+  color: var(--text-strong);
 }
 
 .table-title-sub {
   font-size: 12px;
-  color: var(--text-sub);
+  color: var(--text-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .muted {
-  color: var(--text-sub);
+  /* 行内说明（时间、节点名、条数）在很多页面承担有效信息，
+     统一提到 secondary，避免 11-12px 小字在浅色下糊成一片 */
+  color: var(--text-secondary);
 }
 
 .mono {
@@ -273,42 +619,180 @@ body {
   font-size: 12px;
 }
 
+/* 表格：去重边框，头部分隔更轻，行 hover 用品牌淡色 */
+.ant-table-wrapper .ant-table {
+  background: transparent;
+}
+
+.ant-table-wrapper .ant-table-thead > tr > th {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.ant-table-wrapper .ant-table-tbody > tr > td {
+  font-size: 13.5px;
+}
+
+.ant-table-wrapper .ant-table-tbody > tr:last-child > td {
+  border-bottom: none;
+}
+
 /* ===== 抽屉 ===== */
 .drawer-section {
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 }
 
 .drawer-section-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-main);
+  color: var(--text-strong);
   margin: 0 0 10px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .drawer-section-title::before {
   content: '';
   width: 3px;
   height: 12px;
-  border-radius: 2px;
-  background: var(--brand);
+  border-radius: var(--radius-pill);
+  background: linear-gradient(180deg, var(--brand), var(--brand-active));
   display: inline-block;
+}
+
+/* antd 内置 Alert 底色（#e6f4ff / #fff7e6 / #f6ffed / #fff2f0）不来自我们的 token，
+   深色下由暗色算法重算：实测 1180×97 的提示块色度增量到 13，比同类淡底明显更抢眼。
+   大块统一改用 *-block（更淡一档）。approve-ok 的规则在下面，特异性相同、靠后覆盖。 */
+.ant-alert.ant-alert-info {
+  background: var(--info-block);
+  border-color: var(--info-block-border);
+}
+
+.ant-alert.ant-alert-success {
+  background: var(--success-block);
+  border-color: var(--success-border);
+}
+
+.ant-alert.ant-alert-warning {
+  background: var(--warning-block);
+  border-color: var(--warning-border);
+}
+
+.ant-alert.ant-alert-error {
+  background: var(--danger-block);
+  border-color: var(--danger-border);
+}
+
+/* 可审批状态条：antd 默认 success 底（#f6ffed）在抽屉里是一整块饱和浅绿，
+   与下方空白区对比过强。这里把底色压到接近中性，成功色只留在图标和文字上，
+   状态仍然可辨识，但不抢「通过审批」按钮的注意力。 */
+.approve-ok.ant-alert-success {
+  background: var(--approve-soft);
+  border-color: var(--approve-border);
+}
+
+.approve-ok.ant-alert-success .ant-alert-icon {
+  color: var(--success);
+}
+
+/* ===== 标签：按色相接管 antd preset 色板 =====
+   .ant-tag-blue / -orange 这些类由 antd 内置色板生成，深色下经 darkAlgorithm 重算成
+   0.14–0.16 的高饱和叠加：实测 blue 合成后色度增量 11、orange 10，而 purple 只有 2，
+   同一屏里深浅不一。这里按色相统一交给 --tag-* token，深色下所有色相都是 0.04 的一层雾。
+   用双类选择器（0,2,0）压过 antd 生成的单类规则。 */
+.ant-tag.ant-tag-blue,
+.ant-tag.ant-tag-processing {
+  color: var(--tag-brand-text);
+  background: var(--tag-brand-bg);
+  border-color: var(--tag-brand-border);
+}
+
+.ant-tag.ant-tag-green {
+  color: var(--tag-success-text);
+  background: var(--tag-success-bg);
+  border-color: var(--tag-success-border);
+}
+
+.ant-tag.ant-tag-orange,
+.ant-tag.ant-tag-gold {
+  color: var(--tag-warning-text);
+  background: var(--tag-warning-bg);
+  border-color: var(--tag-warning-border);
+}
+
+.ant-tag.ant-tag-red {
+  color: var(--tag-danger-text);
+  background: var(--tag-danger-bg);
+  border-color: var(--tag-danger-border);
+}
+
+.ant-tag.ant-tag-purple {
+  color: var(--tag-purple-text);
+  background: var(--tag-purple-bg);
+  border-color: var(--tag-purple-border);
+}
+
+.ant-tag.ant-tag-cyan {
+  color: var(--tag-teal-text);
+  background: var(--tag-teal-bg);
+  border-color: var(--tag-teal-border);
+}
+
+.ant-tag.ant-tag-geekblue {
+  color: var(--tag-indigo-text);
+  background: var(--tag-indigo-bg);
+  border-color: var(--tag-indigo-border);
+}
+
+/* 委托记录面板：原来整块写在模板的 inline style 里（#f9f0ff/#efdbff/#531dab），
+   深色下必然是一块亮紫。搬到 class 上由 token 供给，深色自动落到 0.04 的雾。 */
+.trace-delegation-panel {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: var(--purple-block);
+  border: 1px solid var(--purple-block-border);
+  border-radius: var(--radius-md);
+}
+
+.trace-delegation-head {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 6px;
+  color: var(--purple);
+}
+
+.trace-delegation-count {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.trace-delegation-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  padding: 3px 0;
+}
+
+.trace-delegation-arrow {
+  color: var(--purple);
 }
 
 /* 多次沟通：按会话分组，历史会话与进行中会话分别成块 */
 .comm-session {
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 10px 12px 12px;
+  border-radius: var(--radius-lg);
+  padding: 12px 14px 14px;
   margin-bottom: 12px;
-  background: #fcfcfd;
+  background: var(--bg-subtle);
 }
 
 .comm-session.is-active {
-  border-color: #91caff;
-  background: #f5faff;
+  border-color: var(--brand-soft-border);
+  background: var(--brand-soft);
 }
 
 .comm-session-head {
@@ -322,45 +806,46 @@ body {
 .comm-session-index {
   font-size: 12.5px;
   font-weight: 600;
-  color: var(--text-main);
+  color: var(--text-strong);
 }
 
 .comm-session-time {
   font-size: 12px;
-  color: var(--text-sub);
+  color: var(--text-tertiary);
 }
 
 .comm-session-count {
   margin-left: 6px;
   font-size: 12px;
   font-weight: 400;
-  color: var(--text-sub);
+  color: var(--text-tertiary);
 }
 
 .comm-bubble {
-  background: #f7f9fc;
+  background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 12px 14px;
   font-size: 13px;
   line-height: 1.7;
+  color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .comm-target {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 12px 14px;
   margin-bottom: 10px;
-  background: #fff;
+  background: var(--bg-elevated);
 }
 
 /* 后续沟通记录：相对父级沟通缩进，并用左侧连线表达从属关系 */
 .comm-target.is-follow {
   position: relative;
-  border-left: 2px solid #ffe58f;
-  background: #fffdf6;
+  border-left: 2px solid var(--warning-border);
+  background: var(--warning-soft);
 }
 
 .comm-target.is-follow::before {
@@ -370,9 +855,9 @@ body {
   top: -12px;
   width: 10px;
   height: 12px;
-  border-left: 2px solid #ffe58f;
-  border-bottom: 2px solid #ffe58f;
-  border-bottom-left-radius: 6px;
+  border-left: 2px solid var(--warning-border);
+  border-bottom: 2px solid var(--warning-border);
+  border-bottom-left-radius: var(--radius-sm);
 }
 
 .comm-follow-link {
@@ -383,11 +868,11 @@ body {
   margin-bottom: 8px;
   font-size: 12px;
   line-height: 1.6;
-  color: #8a6d1a;
+  color: var(--warning);
 }
 
 .comm-follow-arrow {
-  color: #d48806;
+  color: var(--warning);
   font-weight: 600;
 }
 
@@ -396,7 +881,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-sub);
+  color: var(--text-tertiary);
 }
 
 .comm-target-head {
@@ -409,6 +894,7 @@ body {
 
 .comm-target-name {
   font-weight: 500;
+  color: var(--text-strong);
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -417,39 +903,39 @@ body {
 
 .comm-reply {
   margin-top: 8px;
-  background: #f6ffed;
-  border: 1px solid #d9f7be;
-  border-radius: 8px;
+  background: var(--success-soft);
+  border: 1px solid var(--success-border);
+  border-radius: var(--radius-sm);
   padding: 8px 10px;
   font-size: 12.5px;
   line-height: 1.6;
-  color: #33603c;
+  color: var(--text);
   white-space: pre-wrap;
 }
 
 .comm-reply.pending {
-  background: #fffbe6;
-  border-color: #fff1b8;
-  color: #8a6d1a;
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+  color: var(--text);
 }
 
 .comm-reply.withdrawn {
-  background: #fafafa;
-  border-color: #eee;
-  color: var(--text-sub);
+  background: var(--bg-subtle);
+  border-color: var(--border);
+  color: var(--text-tertiary);
 }
 
 /* 转办链：竖向节点 + 左侧连线，最后一条的接收人是当前办理人 */
 .transfer-chain {
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px 4px;
-  background: #fcfcfd;
+  border-radius: var(--radius-lg);
+  padding: 14px 16px 4px;
+  background: var(--bg-subtle);
 }
 
 .transfer-item {
   position: relative;
-  padding: 0 0 12px 18px;
+  padding: 0 0 14px 18px;
 }
 
 .transfer-item::before {
@@ -461,7 +947,7 @@ body {
   height: 7px;
   border-radius: 50%;
   background: var(--brand);
-  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.12);
+  box-shadow: 0 0 0 3px var(--brand-soft);
 }
 
 .transfer-item:not(:last-child)::after {
@@ -482,6 +968,7 @@ body {
   font-size: 13px;
   font-weight: 500;
   line-height: 1.5;
+  color: var(--text-strong);
 }
 
 .transfer-user {
@@ -489,24 +976,24 @@ body {
 }
 
 .transfer-arrow {
-  color: var(--text-sub);
+  color: var(--text-tertiary);
 }
 
 .transfer-meta {
   margin-top: 2px;
   font-size: 12px;
-  color: var(--text-sub);
+  color: var(--text-tertiary);
 }
 
 .transfer-reason {
   margin-top: 6px;
   padding: 6px 9px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #fff;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
   font-size: 12.5px;
   line-height: 1.6;
-  color: var(--text-main);
+  color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -515,14 +1002,17 @@ body {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  /* 按钮数量随待办状态变化（最多 9 个），窄视口下允许折行，
+     否则 flex 不换行会把最后一个主按钮挤出可视区 */
+  flex-wrap: wrap;
   gap: 10px;
-  padding: 12px 0 0;
+  padding: 14px 0 0;
   border-top: 1px solid var(--border);
 }
 
 .empty-tip {
   text-align: center;
-  color: var(--text-sub);
+  color: var(--text-tertiary);
   font-size: 13px;
   padding: 20px 0;
 }
@@ -531,12 +1021,12 @@ body {
 .login-page {
   min-height: 100vh;
   display: flex;
-  background: #f0f2f5;
+  background: var(--bg-body);
 }
 
 .login-brand {
   flex: 1.15;
-  background: radial-gradient(circle at 20% 20%, #1c4fa1 0%, #061a33 55%, #04101f 100%);
+  background: radial-gradient(circle at 18% 16%, #1d4f9c 0%, #0a1e39 52%, #050d18 100%);
   color: #fff;
   padding: 64px 60px;
   display: flex;
@@ -559,10 +1049,22 @@ body {
     0 0 0 120px rgba(255, 255, 255, 0.02);
 }
 
+/* 登录页品牌区是固定深色底，不跟随主题，文字必须强制为白色 */
+.login-brand .wb-logo {
+  border-bottom: none;
+  margin-bottom: 0;
+  color: #ffffff;
+}
+
+.login-brand .wb-logo-sub {
+  color: rgba(255, 255, 255, 0.72);
+  opacity: 1;
+}
+
 .login-brand-title {
-  font-size: 30px;
-  font-weight: 600;
-  line-height: 1.4;
+  font-size: 32px;
+  font-weight: 650;
+  line-height: 1.35;
   margin: 0 0 16px;
   letter-spacing: 0.5px;
 }
@@ -570,7 +1072,7 @@ body {
 .login-brand-desc {
   font-size: 14px;
   line-height: 1.9;
-  color: rgba(255, 255, 255, 0.65);
+  color: rgba(255, 255, 255, 0.62);
   max-width: 420px;
   margin: 0;
 }
@@ -588,7 +1090,7 @@ body {
   align-items: flex-start;
   gap: 10px;
   font-size: 13.5px;
-  color: rgba(255, 255, 255, 0.78);
+  color: rgba(255, 255, 255, 0.76);
 }
 
 .login-feature-dot {
@@ -596,16 +1098,25 @@ body {
   height: 6px;
   border-radius: 50%;
   background: #57a6ff;
+  box-shadow: 0 0 0 3px rgba(87, 166, 255, 0.18);
   margin-top: 8px;
   flex: 0 0 auto;
 }
 
 .login-panel {
   flex: 0 0 480px;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 40px;
+}
+
+/* 登录页的主题切换：右上角，与表单视觉权重区分开 */
+.login-theme-toggle {
+  position: absolute;
+  top: 20px;
+  right: 20px;
 }
 
 .login-card {
@@ -615,32 +1126,34 @@ body {
 
 .login-card h2 {
   margin: 0 0 6px;
-  font-size: 24px;
-  font-weight: 600;
+  font-size: 26px;
+  font-weight: 650;
+  color: var(--text-strong);
+  letter-spacing: 0.2px;
 }
 
 .login-card .login-sub {
-  color: var(--text-sub);
+  color: var(--text-tertiary);
   font-size: 13px;
   margin: 0 0 26px;
 }
 
 .login-tip {
-  margin-top: 18px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: #f7f9fc;
+  margin-top: 20px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
   border: 1px solid var(--border);
   font-size: 12px;
   line-height: 1.8;
-  color: var(--text-sub);
+  color: var(--text-secondary);
 }
 
 .login-tip code {
   color: var(--brand);
-  background: #eaf2ff;
+  background: var(--brand-soft);
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 12px;
 }
 
@@ -655,16 +1168,24 @@ body {
   .wb-content {
     padding: 12px;
   }
+  .page-title {
+    font-size: 19px;
+  }
   .stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-  }
-  .stat-card {
-    padding: 12px;
     gap: 10px;
   }
+  .stat-card {
+    padding: 13px;
+    gap: 10px;
+  }
+  .stat-icon {
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
+  }
   .stat-value {
-    font-size: 20px;
+    font-size: 21px;
   }
   .login-brand {
     display: none;
@@ -678,5 +1199,16 @@ body {
   }
   .wb-user-meta {
     display: none;
+  }
+}
+
+/* 尊重系统的「减少动态效果」设置 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

@@ -11,7 +11,7 @@
       </a-space>
     </div>
 
-    <a-card :bordered="false" style="border-radius: 10px">
+    <a-card :bordered="false">
       <div class="toolbar">
         <a-input-search v-model:value="keyword" placeholder="搜索标题、发送人" allow-clear style="max-width: 300px" @search="search" />
         <a-segmented v-model:value="status" :options="statusOptions" @change="search" />
@@ -184,7 +184,7 @@ onMounted(load)
   display: block;
   margin-top: 2px;
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.55);
+  color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
 }

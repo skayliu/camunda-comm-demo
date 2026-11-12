@@ -23,6 +23,7 @@ const COMPONENTS = {
   Card: ['card'],
   Col: ['grid', 'Col'],
   Checkbox: ['checkbox'],
+  ConfigProvider: ['config-provider'],
   CheckboxGroup: ['checkbox', 'CheckboxGroup'],
   DatePicker: ['date-picker'],
   Descriptions: ['descriptions'],

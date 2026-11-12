@@ -1218,15 +1218,15 @@ onBeforeUnmount(() => {
   inset: 0;
   display: flex;
   flex-direction: column;
-  background: #fff;
+  background: var(--bg-elevated);
   overflow: hidden;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-lg);
 }
 
 .bd-shell.is-window {
   inset: auto;
   border-radius: 10px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--border);
 }
 
 .bd-shell.is-dragging {
@@ -1246,7 +1246,7 @@ onBeforeUnmount(() => {
   gap: 16px;
   padding: 0 10px 0 16px;
   border-bottom: 1px solid #eef0f3;
-  background: linear-gradient(180deg, #ffffff 0%, #fafbfc 100%);
+  background: linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-subtle) 100%);
 }
 
 .bd-head.can-drag {
@@ -1279,7 +1279,7 @@ onBeforeUnmount(() => {
 .bd-name {
   font-size: 15px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.88);
+  color: var(--text-strong);
   line-height: 20px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1288,7 +1288,7 @@ onBeforeUnmount(() => {
 
 .bd-sub {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.42);
+  color: var(--text-tertiary);
   line-height: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1315,14 +1315,14 @@ onBeforeUnmount(() => {
   width: 1px;
   height: 18px;
   margin: 0 2px;
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--bg-active);
   flex: 0 0 auto;
 }
 
 .drag-hint {
   margin-right: 6px;
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.35);
+  color: var(--text-tertiary);
   white-space: nowrap;
 }
 
@@ -1335,15 +1335,15 @@ onBeforeUnmount(() => {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: rgba(0, 0, 0, 0.6);
+  color: var(--text);
   font-size: 15px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
 
 .icon-btn:hover {
-  background: rgba(0, 0, 0, 0.06);
-  color: rgba(0, 0, 0, 0.88);
+  background: var(--bg-active);
+  color: var(--text-strong);
 }
 
 .remember-wrap {
@@ -1396,8 +1396,8 @@ onBeforeUnmount(() => {
   z-index: 30;
   width: 232px;
   padding: 6px;
-  background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.14);
 }
@@ -1405,7 +1405,7 @@ onBeforeUnmount(() => {
 .remember-menu-tip {
   padding: 3px 8px 6px;
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.4);
+  color: var(--text-tertiary);
 }
 
 .remember-item {
@@ -1423,7 +1423,7 @@ onBeforeUnmount(() => {
 }
 
 .remember-item:hover {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--bg-hover);
 }
 
 .remember-item.is-active {
@@ -1450,7 +1450,7 @@ onBeforeUnmount(() => {
 .item-label {
   font-size: 12.5px;
   line-height: 18px;
-  color: rgba(0, 0, 0, 0.85);
+  color: var(--text-strong);
 }
 
 .remember-item.is-active .item-label {
@@ -1461,7 +1461,7 @@ onBeforeUnmount(() => {
 .item-desc {
   font-size: 11px;
   line-height: 15px;
-  color: rgba(0, 0, 0, 0.42);
+  color: var(--text-tertiary);
 }
 
 .bd-fade-enter-active,
@@ -1522,7 +1522,7 @@ onBeforeUnmount(() => {
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: rgba(0, 0, 0, 0.62);
+  color: var(--text);
   font-size: 14px;
   cursor: pointer;
 }
@@ -1536,7 +1536,7 @@ onBeforeUnmount(() => {
   min-width: 40px;
   text-align: center;
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.55);
+  color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1544,7 +1544,7 @@ onBeforeUnmount(() => {
   width: 1px;
   height: 16px;
   margin: 0 3px;
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--bg-active);
 }
 
 .bd-tip {
@@ -1555,9 +1555,9 @@ onBeforeUnmount(() => {
   padding: 5px 10px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.88);
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--border);
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
   pointer-events: none;
 }
 
@@ -1578,13 +1578,13 @@ onBeforeUnmount(() => {
 .state-title {
   margin: 4px 0 0;
   font-size: 14px;
-  color: rgba(0, 0, 0, 0.72);
+  color: var(--text);
 }
 
 .state-sub {
   margin: 0;
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.4);
+  color: var(--text-tertiary);
 }
 
 .state-error {
@@ -1600,7 +1600,7 @@ onBeforeUnmount(() => {
   padding: 5px 16px;
   border-radius: 6px;
   border: 1px solid #1677ff;
-  background: #fff;
+  background: var(--bg-elevated);
   color: #1677ff;
   font-size: 13px;
   cursor: pointer;
@@ -1632,8 +1632,8 @@ onBeforeUnmount(() => {
   max-width: 82vw;
   display: flex;
   flex-direction: column;
-  background: #fff;
-  border-left: 1px solid rgba(0, 0, 0, 0.08);
+  background: var(--bg-elevated);
+  border-left: 1px solid var(--border);
   box-shadow: -12px 0 32px rgba(0, 0, 0, 0.08);
 }
 
@@ -1644,13 +1644,13 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 8px;
   padding: 14px 8px 12px 16px;
-  border-bottom: 1px solid #f0f2f5;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .drawer-title {
   font-size: 14px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.88);
+  color: var(--text-strong);
   line-height: 20px;
   word-break: break-word;
 }
@@ -1675,7 +1675,7 @@ onBeforeUnmount(() => {
 
 .drawer-id {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.4);
+  color: var(--text-tertiary);
   word-break: break-all;
 }
 
@@ -1694,7 +1694,7 @@ onBeforeUnmount(() => {
   margin-bottom: 6px;
   font-size: 12px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
   letter-spacing: 0.3px;
 }
 
@@ -1712,14 +1712,14 @@ onBeforeUnmount(() => {
 
 .prop-label {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
   line-height: 18px;
   word-break: break-word;
 }
 
 .prop-value {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.82);
+  color: var(--text-strong);
   line-height: 18px;
   word-break: break-word;
   white-space: pre-wrap;

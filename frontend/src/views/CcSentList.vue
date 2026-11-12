@@ -75,7 +75,7 @@
       </div>
     </div>
 
-    <a-card :bordered="false" style="border-radius: 10px">
+    <a-card :bordered="false">
       <div class="toolbar">
         <a-input-search
           v-model:value="keyword"
@@ -201,7 +201,7 @@
               :percent="record.readRate"
               size="small"
               :show-info="false"
-              :stroke-color="record.readRate >= 100 ? '#52c41a' : '#fa8c16'"
+              :stroke-color="record.readRate >= 100 ? 'var(--success)' : 'var(--warning)'"
             />
           </template>
           <template v-else-if="column.key === 'lastSendTime'">
@@ -328,7 +328,7 @@
             </div>
           </template>
           <template v-else-if="column.key === 'deadline'">
-            <span :style="record.overdue ? { color: '#cf1322' } : null">
+            <span :style="record.overdue ? { color: 'var(--danger)' } : null">
               {{ record.deadline ? fmt(record.deadline) : '不限期' }}
             </span>
           </template>
@@ -623,7 +623,7 @@ onMounted(load)
   display: block;
   margin-top: 2px;
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.55);
+  color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -640,32 +640,34 @@ onMounted(load)
   flex-direction: column;
   gap: 4px;
   padding: 14px 16px;
-  background: #fff;
+  background: var(--bg-elevated);
   border-radius: 10px;
 }
 
 .stat-label {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-secondary);
 }
 
 .stat-value {
   font-size: 22px;
   font-weight: 600;
   line-height: 1.2;
-  color: rgba(0, 0, 0, 0.85);
+  color: var(--text-strong);
 }
 
+/* 状态数字用语义色：原来的 #fa8c16 / #52c41a 在白底上只有 2.4 / 2.3:1，
+   22px 也不算大字号，读起来发灰发虚 */
 .stat-value.warn {
-  color: #fa8c16;
+  color: var(--warning);
 }
 
 .stat-value.ok {
-  color: #52c41a;
+  color: var(--success);
 }
 
 .stat-value.muted {
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-secondary);
 }
 
 .receiver-tags {
@@ -685,7 +687,7 @@ onMounted(load)
 
 .group-detail {
   padding: 4px 8px 8px;
-  background: #fafafa;
+  background: var(--bg-subtle);
   border-radius: 8px;
 }
 

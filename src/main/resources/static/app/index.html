@@ -5,9 +5,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- 显式声明图标，避免浏览器再去根路径请求 /favicon.ico 拿到 404 -->
     <link rel="icon" type="image/svg+xml" href="/app/favicon.svg" />
+    <meta name="theme-color" content="#f1f4f9" />
     <title>待办中心 | 流程沟通协作</title>
-    <script type="module" crossorigin src="/app/assets/index-Ca1uioCg.js"></script>
-    <link rel="stylesheet" crossorigin href="/app/assets/index-BmWxf8_6.css">
+    <!--
+      主题预判：在 CSS 与应用脚本之前就把 data-theme 定下来，
+      否则首帧会先按浅色渲染再跳到深色（白闪）。键名与
+      src/composables/useTheme.js 里的 STORAGE_KEY 保持一致。
+    -->
+    <script>
+      (function () {
+        try {
+          var mode = localStorage.getItem('wb-theme-mode') || 'system'
+          var dark =
+            mode === 'dark' ||
+            (mode !== 'light' &&
+              window.matchMedia &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+        } catch (e) {
+          document.documentElement.dataset.theme = 'light'
+        }
+      })()
+    </script>
+    <script type="module" crossorigin src="/app/assets/index-PSRB0eBX.js"></script>
+    <link rel="modulepreload" crossorigin href="/app/assets/AntdIcon-DlD6UpJH.js">
+    <link rel="modulepreload" crossorigin href="/app/assets/rolldown-runtime-XKyaHtl9.js">
+    <link rel="modulepreload" crossorigin href="/app/assets/api-DXkJTjHV.js">
+    <link rel="stylesheet" crossorigin href="/app/assets/index-Ca-J85WB.css">
   </head>
   <body>
     <div id="app"></div>

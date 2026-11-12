@@ -19,7 +19,7 @@
 
     <div class="stat-grid">
       <div class="stat-card">
-        <div class="stat-icon" style="background: #e6f4ff; color: #1677ff">
+        <div class="stat-icon tone-brand">
           <InboxOutlined />
         </div>
         <div>
@@ -28,7 +28,7 @@
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon" style="background: #e6fffb; color: #13c2c2">
+        <div class="stat-icon tone-teal">
           <AuditOutlined />
         </div>
         <div>
@@ -37,7 +37,7 @@
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon" style="background: #f9f0ff; color: #722ed1">
+        <div class="stat-icon tone-purple">
           <MessageOutlined />
         </div>
         <div>
@@ -46,7 +46,7 @@
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon" style="background: #fff7e6; color: #fa8c16">
+        <div class="stat-icon tone-warning">
           <ClockCircleOutlined />
         </div>
         <div>
@@ -56,7 +56,7 @@
       </div>
     </div>
 
-    <a-card :bordered="false" style="border-radius: 10px">
+    <a-card :bordered="false">
       <div class="toolbar">
         <a-input-search
           v-model:value="keyword"

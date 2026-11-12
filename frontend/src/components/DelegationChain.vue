@@ -59,7 +59,7 @@ function statusColor(status) {
   gap: 10px;
 }
 .delegation-item {
-  border-left: 3px solid #d6e4ff;
+  border-left: 3px solid var(--brand-soft-border);
   padding: 6px 0 6px 10px;
 }
 .delegation-line {
@@ -73,27 +73,27 @@ function statusColor(status) {
   font-weight: 600;
 }
 .delegation-user.is-agent {
-  color: #722ed1;
+  color: var(--purple);
 }
 .delegation-arrow {
-  color: #9254de;
+  color: var(--purple);
 }
 .delegation-meta {
   margin-top: 2px;
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-secondary);
 }
 .delegation-reason {
   margin-top: 4px;
   font-size: 12.5px;
-  color: rgba(0, 0, 0, 0.65);
+  color: var(--text);
 }
 .delegation-resolve {
   margin-top: 6px;
   padding: 6px 8px;
-  background: #f6ffed;
+  background: var(--success-soft);
   border-radius: 6px;
   font-size: 12.5px;
-  color: #3f6600;
+  color: var(--success);
 }
 </style>

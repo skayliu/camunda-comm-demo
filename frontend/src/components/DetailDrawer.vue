@@ -44,18 +44,24 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:open', 'close'])
 
+const winWidth = ref(window.innerWidth)
 const isMobile = ref(window.innerWidth <= 768)
 
 // 原实现只在组件创建时判一次宽度，旋转屏幕或拖动窗口后不再更新，
 // 这里补上监听，退出时移除。
 function syncMobile() {
+  winWidth.value = window.innerWidth
   isMobile.value = window.innerWidth <= 768
 }
 
 onMounted(() => window.addEventListener('resize', syncMobile))
 onBeforeUnmount(() => window.removeEventListener('resize', syncMobile))
 
-const drawerWidth = computed(() => (isMobile.value ? '100%' : props.width))
+// 宽抽屉（如待办详情 780）在 769–779 的窄视口里会超出屏幕右侧，
+// 这里用视口宽兜底；宽度小于视口时仍取传入值，不影响其他抽屉。
+const drawerWidth = computed(() =>
+  isMobile.value ? '100%' : Math.min(props.width, winWidth.value)
+)
 
 function close() {
   emit('update:open', false)

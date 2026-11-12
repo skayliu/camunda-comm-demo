@@ -13,7 +13,7 @@
       </a-button>
     </div>
 
-    <a-card :bordered="false" style="border-radius: 10px">
+    <a-card :bordered="false">
       <a-tabs v-model:activeKey="tab" @change="onTabChange">
         <a-tab-pane key="out" tab="我的委托" />
         <a-tab-pane key="in" tab="我的受托" />
@@ -239,9 +239,9 @@ onMounted(load)
 <style scoped>
 .is-me {
   font-weight: 600;
-  color: #1677ff;
+  color: var(--brand);
 }
 .arrow {
-  color: #9254de;
+  color: var(--purple);
 }
 </style>

@@ -111,17 +111,17 @@
         </div>
 
         <!-- 委托记录：责任仍在委托人，展示谁把哪条待办交给了谁 -->
-        <div v-if="delegations.length" class="trace-delegation-panel" style="margin: 0 0 12px; padding: 10px 12px; background: #f9f0ff; border: 1px solid #efdbff; border-radius: 8px">
-          <div style="font-weight: 600; font-size: 13px; margin-bottom: 6px; color: #531dab">
-            委托记录 <span style="font-weight: 400; color: rgba(0,0,0,.45)">共 {{ delegations.length }} 次</span>
+        <div v-if="delegations.length" class="trace-delegation-panel">
+          <div class="trace-delegation-head">
+            委托记录 <span class="trace-delegation-count">共 {{ delegations.length }} 次</span>
           </div>
           <div
             v-for="d in delegations"
             :key="d.id"
-            style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; padding: 3px 0"
+            class="trace-delegation-row"
           >
             <b>{{ d.owner }}</b>
-            <span style="color: #9254de">⇢</span>
+            <span class="trace-delegation-arrow">⇢</span>
             <b>{{ d.delegateUser }}</b>
             <a-tag :color="d.status === 'PENDING' ? 'orange' : (d.status === 'RESOLVED' ? 'green' : 'default')" style="margin-inline-end: 0">
               {{ d.status === 'PENDING' ? '委托中' : (d.status === 'RESOLVED' ? '已交回' : '已收回') }}
@@ -233,7 +233,7 @@
                 markerHeight="7"
                 orient="auto-start-reverse"
               >
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="#52c41a" />
+                <path d="M 0 0 L 10 5 L 0 10 z" :fill="paint.done" />
               </marker>
               <marker
                 id="trace-arrow-active"
@@ -244,7 +244,7 @@
                 markerHeight="7"
                 orient="auto-start-reverse"
               >
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="#1677ff" />
+                <path d="M 0 0 L 10 5 L 0 10 z" :fill="paint.active" />
               </marker>
               <marker
                 id="trace-arrow-idle"
@@ -255,7 +255,7 @@
                 markerHeight="7"
                 orient="auto-start-reverse"
               >
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="#d9d9d9" />
+                <path d="M 0 0 L 10 5 L 0 10 z" :fill="paint.idle" />
               </marker>
             </defs>
 
@@ -265,7 +265,7 @@
                 :points="edgePoints(edge)"
                 fill="none"
                 :class="{ 'trace-edge-active': edge.active }"
-                :stroke="edge.active ? '#1677ff' : edge.taken ? '#52c41a' : '#d9d9d9'"
+                :stroke="edgeStroke(edge)"
                 :stroke-width="edge.active ? 2.2 : edge.taken ? 2 : 1.4"
                 :marker-end="
                   edge.active
@@ -296,7 +296,7 @@
                   :cy="cy(node)"
                   :r="node.width / 2 + 3"
                   fill="none"
-                  :stroke="node.commLocked ? '#fa8c16' : '#1677ff'"
+                  :stroke="node.commLocked ? paint.comm : paint.active"
                   stroke-width="4"
                   class="trace-pulse"
                 />
@@ -304,7 +304,7 @@
                   v-else-if="isGateway(node)"
                   :points="diamondPoints(node)"
                   fill="none"
-                  :stroke="node.commLocked ? '#fa8c16' : '#1677ff'"
+                  :stroke="node.commLocked ? paint.comm : paint.active"
                   stroke-width="4"
                   class="trace-pulse"
                 />
@@ -316,7 +316,7 @@
                   :height="node.height + 6"
                   rx="13"
                   fill="none"
-                  :stroke="node.commLocked ? '#fa8c16' : '#1677ff'"
+                  :stroke="node.commLocked ? paint.comm : paint.active"
                   stroke-width="4"
                   class="trace-pulse"
                 />
@@ -628,7 +628,7 @@
                       rx="1"
                       :fill="nodeIconColor(node)"
                     />
-                    <polyline points="1.8,4.2 7,8 12.2,4.2" stroke="#fff" />
+                    <polyline points="1.8,4.2 7,8 12.2,4.2" :stroke="paint.onAccent" />
                   </template>
                   <template v-else-if="taskMark(node) === 'receive'">
                     <rect x="1.8" y="3.4" width="10.4" height="7.2" rx="1" />
@@ -647,7 +647,7 @@
                   :y="node.y + node.height / 2 + 16"
                   text-anchor="middle"
                   class="trace-sublabel"
-                  :fill="node.status === 'PENDING' ? '#bfbfbf' : '#8c8c8c'"
+                  :fill="node.status === 'PENDING' ? paint.idleTextWeak : paint.idleText"
                 >{{ subText(node) }}</text>
               </template>
 
@@ -658,7 +658,7 @@
                   :cy="node.y + 9"
                   r="6"
                   :fill="nodeStroke(node)"
-                  stroke="#fff"
+                  :stroke="paint.badgeRing"
                   stroke-width="1.5"
                 />
                 <text
@@ -666,6 +666,7 @@
                   :y="node.y + 12.5"
                   text-anchor="middle"
                   class="trace-badge"
+                  :fill="paint.badgeText"
                 >{{ node.status === 'COMPLETED' ? '✓' : (node.status === 'ACTIVE' ? '▶' : '') }}</text>
               </g>
 
@@ -678,8 +679,8 @@
                   :cx="node.x + node.width - 7"
                   :cy="transferMarkCy(node)"
                   r="7"
-                  fill="#fa8c16"
-                  stroke="#fff"
+                  :fill="paint.comm"
+                  :stroke="paint.badgeRing"
                   stroke-width="1.5"
                 />
                 <text
@@ -735,15 +736,15 @@
                   width="16"
                   height="16"
                   rx="4"
-                  fill="#1677ff"
-                  stroke="#fff"
+                  :fill="paint.active"
+                  :stroke="paint.onAccent"
                   stroke-width="1.4"
                 />
                 <!-- 箭头：右下方向 + 折角，表示「进入下一层」 -->
                 <path
                   :d="drillBadgeArrow(node)"
                   fill="none"
-                  stroke="#fff"
+                  :stroke="paint.onAccent"
                   stroke-width="1.6"
                   stroke-linecap="round"
                   stroke-linejoin="round"
@@ -1091,6 +1092,57 @@ import {
 } from '@ant-design/icons-vue'
 import message from 'ant-design-vue/es/message'
 import { errorText, wbApi } from '../api'
+import { useTheme } from '../composables/useTheme'
+
+// 流程图是命令式绘制的 SVG，颜色写在元素属性里，CSS 变量管不到，
+// 所以这里按主题切两套绘图色板；导出图片时强制回落到浅色（exportLight）。
+const { isDark } = useTheme()
+const exportLight = ref(false)
+
+// 绘图色板：深色下节点用低饱和深底 + 高亮描边，避免浅色卡片在暗底上炸开
+const PAINT_LIGHT = {
+  doneFill: '#f6ffed',
+  activeFill: '#e6f4ff',
+  commFill: '#fff7e6',
+  idleFill: '#fafafa',
+  done: '#52c41a',
+  active: '#1677ff',
+  idle: '#d9d9d9',
+  comm: '#fa8c16',
+  doneText: '#135200',
+  activeText: '#0958d9',
+  commText: '#ad4e00',
+  idleText: '#8c8c8c',
+  idleTextWeak: '#bfbfbf',
+  purple: '#722ed1',
+  badgeRing: '#ffffff',
+  badgeText: '#ffffff',
+  onAccent: '#ffffff'
+}
+
+const PAINT_DARK = {
+  doneFill: 'rgba(62, 207, 142, 0.14)',
+  activeFill: 'rgba(64, 150, 255, 0.18)',
+  commFill: 'rgba(245, 176, 76, 0.14)',
+  idleFill: '#1a222d',
+  done: '#3ecf8e',
+  active: '#4096ff',
+  idle: '#37455a',
+  comm: '#f5b04c',
+  doneText: '#a8ecc9',
+  activeText: '#a5cdff',
+  commText: '#ffd08a',
+  idleText: '#8e9bad',
+  idleTextWeak: '#5f6b7c',
+  purple: '#b37feb',
+  badgeRing: '#0f1620',
+  badgeText: '#0b0f15',
+  onAccent: '#ffffff'
+}
+
+const paint = computed(() =>
+  isDark.value && !exportLight.value ? PAINT_DARK : PAINT_LIGHT
+)
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -1593,6 +1645,35 @@ function exportBaseName() {
   return safeFileName(d.processTitle) || safeFileName(props.processInstanceId) || '流程跟踪图'
 }
 
+// 导出图固定白底（便于贴进文档/聊天），深色模式下的节点色到了白底上会发灰，
+// 所以克隆后把绘图色按浅色板回写一遍，保证导出结果与主题无关。
+const DARK_TO_LIGHT = new Map([
+  [PAINT_DARK.doneFill, PAINT_LIGHT.doneFill],
+  [PAINT_DARK.activeFill, PAINT_LIGHT.activeFill],
+  [PAINT_DARK.commFill, PAINT_LIGHT.commFill],
+  [PAINT_DARK.idleFill, PAINT_LIGHT.idleFill],
+  [PAINT_DARK.done, PAINT_LIGHT.done],
+  [PAINT_DARK.active, PAINT_LIGHT.active],
+  [PAINT_DARK.idle, PAINT_LIGHT.idle],
+  [PAINT_DARK.comm, PAINT_LIGHT.comm],
+  [PAINT_DARK.doneText, PAINT_LIGHT.doneText],
+  [PAINT_DARK.activeText, PAINT_LIGHT.activeText],
+  [PAINT_DARK.commText, PAINT_LIGHT.commText],
+  [PAINT_DARK.idleText, PAINT_LIGHT.idleText],
+  [PAINT_DARK.idleTextWeak, PAINT_LIGHT.idleTextWeak],
+  [PAINT_DARK.purple, PAINT_LIGHT.purple],
+  [PAINT_DARK.badgeRing, PAINT_LIGHT.badgeRing]
+])
+
+function restoreLightPaint(root) {
+  root.querySelectorAll('*').forEach((el) => {
+    ;['fill', 'stroke'].forEach((attr) => {
+      const value = el.getAttribute(attr)
+      if (value && DARK_TO_LIGHT.has(value)) el.setAttribute(attr, DARK_TO_LIGHT.get(value))
+    })
+  })
+}
+
 // 组装导出画布：标题栏（流程名/状态/发起信息/节点统计）+ 流程图 + 图例
 // SVG 与 PNG 共用同一份画布，保证两种格式内容完全一致
 function buildExportFigure(options = {}) {
@@ -1603,6 +1684,7 @@ function buildExportFigure(options = {}) {
   if (!d || !d.diagramAvailable || !srcSvg) return null
 
   const clone = srcSvg.cloneNode(true)
+  if (isDark.value) restoreLightPaint(clone)
   inlineSvgStyles(srcSvg, clone)
   // 下钻徽标是交互控件，导出的静态图里点不动，留着只会造成误解。
   // 节点底部的 ☐+ 仍在，仍能表达「这是可展开的子流程」。
@@ -2043,16 +2125,24 @@ function taskMark(node) {
   return null
 }
 
-// 图标比描边更细，未开始时用 #bfbfbf，避免在浅灰背景上几乎看不见
+// 图标比描边更细，未开始时用弱化色，避免在浅灰背景上几乎看不见
 function nodeIconColor(node) {
-  if (node.commLocked) return '#fa8c16'
-  if (node.status === 'COMPLETED') return '#52c41a'
-  if (node.status === 'ACTIVE') return '#1677ff'
-  return '#bfbfbf'
+  const c = paint.value
+  if (node.commLocked) return c.comm
+  if (node.status === 'COMPLETED') return c.done
+  if (node.status === 'ACTIVE') return c.active
+  return c.idleTextWeak
 }
 
 function cx(node) {
   return node.x + node.width / 2
+}
+
+// 连线配色：执行中 > 已走过 > 未开始
+function edgeStroke(edge) {
+  const c = paint.value
+  if (edge.active) return c.active
+  return edge.taken ? c.done : c.idle
 }
 
 function cy(node) {
@@ -2071,24 +2161,27 @@ function gatewayMark(node) {
 }
 
 function nodeFill(node) {
-  if (node.commLocked) return '#fff7e6'
-  if (node.status === 'COMPLETED') return '#f6ffed'
-  if (node.status === 'ACTIVE') return '#e6f4ff'
-  return '#fafafa'
+  const c = paint.value
+  if (node.commLocked) return c.commFill
+  if (node.status === 'COMPLETED') return c.doneFill
+  if (node.status === 'ACTIVE') return c.activeFill
+  return c.idleFill
 }
 
 function nodeStroke(node) {
-  if (node.commLocked) return '#fa8c16'
-  if (node.status === 'COMPLETED') return '#52c41a'
-  if (node.status === 'ACTIVE') return '#1677ff'
-  return '#d9d9d9'
+  const c = paint.value
+  if (node.commLocked) return c.comm
+  if (node.status === 'COMPLETED') return c.done
+  if (node.status === 'ACTIVE') return c.active
+  return c.idle
 }
 
 function nodeTextColor(node) {
-  if (node.status === 'PENDING' && !node.commLocked) return '#8c8c8c'
-  if (node.commLocked) return '#ad4e00'
-  if (node.status === 'ACTIVE') return '#0958d9'
-  return '#135200'
+  const c = paint.value
+  if (node.status === 'PENDING' && !node.commLocked) return c.idleText
+  if (node.commLocked) return c.commText
+  if (node.status === 'ACTIVE') return c.activeText
+  return c.doneText
 }
 
 function shortName(name, max = 7) {
@@ -2186,12 +2279,13 @@ function timeOf(task) {
 // 图上沟通角标：待反馈优先（橙），其次已收回（灰），最后才是已反馈/进行中的沟通（紫）。
 // 收回的记录在引擎里没有任务了，若仍按条数显示“N沟通”，图上会看起来像还在推进。
 function commBadge(node) {
+  const c = paint.value
   const pending = node.pendingCommCount || 0
   const withdrawn = node.withdrawnCommCount || 0
   const total = (node.commTasks || []).length
-  if (pending > 0) return { width: 30, fill: '#fa8c16', text: `${pending}待` }
-  if (withdrawn > 0) return { width: 34, fill: '#8c8c8c', text: `${withdrawn}收回` }
-  return { width: 30, fill: '#722ed1', text: `${total}沟通` }
+  if (pending > 0) return { width: 30, fill: c.comm, text: `${pending}待` }
+  if (withdrawn > 0) return { width: 34, fill: c.idleText, text: `${withdrawn}收回` }
+  return { width: 30, fill: c.purple, text: `${total}沟通` }
 }
 
 // 悬停浮层里的沟通汇总，同样区分待反馈与已收回
@@ -2932,7 +3026,7 @@ onBeforeUnmount(() => {
 .trace-title-sub {
   font-size: 13px;
   font-weight: 400;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2945,12 +3039,12 @@ onBeforeUnmount(() => {
   right: 52px;
   width: 32px;
   height: 32px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
   z-index: 2;
 }
 .trace-window-btn:hover {
   color: #1677ff;
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--bg-hover);
 }
 /* 调用子流程下钻：+ 号可点击时给出手型与悬停反馈 */
 .trace-subprocess-mark.is-drillable {
@@ -3013,7 +3107,7 @@ onBeforeUnmount(() => {
   gap: 4px;
   flex-wrap: wrap;
   min-width: 0;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
 }
 .trace-drill-crumb {
   color: #1677ff;
@@ -3027,10 +3121,10 @@ onBeforeUnmount(() => {
   text-decoration: underline;
 }
 .trace-drill-sep {
-  color: rgba(0, 0, 0, 0.25);
+  color: var(--text-disabled);
 }
 .trace-drill-current {
-  color: rgba(0, 0, 0, 0.85);
+  color: var(--text-strong);
   font-weight: 500;
   max-width: 220px;
   overflow: hidden;
@@ -3039,12 +3133,12 @@ onBeforeUnmount(() => {
 }
 .trace-drill-tip {
   margin-left: auto;
-  color: rgba(0, 0, 0, 0.35);
+  color: var(--text-tertiary);
 }
 /* 直接打开子流程时的父级入口：与下钻面包屑同一形态，用淡橙区分「不是下钻来的」 */
 .trace-drill-bar.is-parent-entry {
   border-color: #ffe0b2;
-  background: #fffaf0;
+  background: var(--warning-soft);
 }
 .trace-drill-bar.is-parent-entry .trace-drill-crumb {
   color: #d46b08;
@@ -3053,7 +3147,7 @@ onBeforeUnmount(() => {
 .trace-child-tip {
   margin-bottom: 10px;
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
 }
 .trace-child-item {
   padding: 10px 12px;
@@ -3066,7 +3160,7 @@ onBeforeUnmount(() => {
   margin-top: 8px;
 }
 .trace-child-item:hover {
-  border-color: #91caff;
+  border-color: var(--brand-soft-border);
   background: #f2f8ff;
 }
 .trace-child-main {
@@ -3084,7 +3178,7 @@ onBeforeUnmount(() => {
 /* 部门沟通的下钻项：部门名跟在流程名后面，弱化显示，避免与流程名抢注意力 */
 .trace-child-dept {
   font-weight: 400;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
 }
 .trace-child-meta {
   margin-top: 4px;
@@ -3092,7 +3186,7 @@ onBeforeUnmount(() => {
   gap: 12px;
   flex-wrap: wrap;
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
 }
 .trace-overview {
   display: flex;
@@ -3117,7 +3211,7 @@ onBeforeUnmount(() => {
   gap: 14px;
   flex-wrap: wrap;
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
 }
 .trace-overview-current {
   margin-top: 8px;
@@ -3131,7 +3225,7 @@ onBeforeUnmount(() => {
   min-width: 62px;
   padding: 6px 10px;
   border-radius: 8px;
-  background: #fff;
+  background: var(--bg-elevated);
   border: 1px solid #eef0f3;
   text-align: center;
 }
@@ -3142,7 +3236,7 @@ onBeforeUnmount(() => {
 }
 .trace-stat span {
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
 }
 .trace-stat.is-active b {
   color: #1677ff;
@@ -3216,7 +3310,7 @@ onBeforeUnmount(() => {
 .trace-transfer-item {
   padding: 6px 10px;
   border-left: 2px solid #ffd591;
-  background: #fffbf5;
+  background: var(--warning-soft);
   border-radius: 0 6px 6px 0;
   margin-bottom: 6px;
 }
@@ -3251,7 +3345,7 @@ onBeforeUnmount(() => {
 .trace-transfer-badge {
   font-size: 9px;
   font-weight: 600;
-  fill: #fff;
+  fill: var(--bg-elevated);
   pointer-events: none;
 }
 .trace-toolbar {
@@ -3266,7 +3360,7 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 14px;
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.55);
+  color: var(--text);
 }
 .legend-item {
   display: inline-flex;
@@ -3303,7 +3397,7 @@ onBeforeUnmount(() => {
 }
 .trace-zoom-text {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.55);
+  color: var(--text);
   min-width: 38px;
   text-align: center;
 }
@@ -3345,7 +3439,7 @@ onBeforeUnmount(() => {
   gap: 0;
   padding: 2px 4px;
   border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.94);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   cursor: default;
@@ -3367,7 +3461,7 @@ onBeforeUnmount(() => {
   width: 1px;
   height: 14px;
   margin: 0 2px;
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--bg-active);
 }
 /* 全屏时画布铺满屏幕，工具条常显 */
 .trace-canvas:fullscreen,
@@ -3391,7 +3485,7 @@ onBeforeUnmount(() => {
   will-change: transform;
 }
 .trace-hint {
-  color: rgba(0, 0, 0, 0.35);
+  color: var(--text-tertiary);
 }
 .trace-svg {
   display: block;
@@ -3426,12 +3520,12 @@ onBeforeUnmount(() => {
 }
 .trace-badge {
   font-size: 7px;
-  fill: #fff;
+  fill: var(--bg-elevated);
   font-family: inherit;
 }
 .trace-comm-badge {
   font-size: 9px;
-  fill: #fff;
+  fill: var(--bg-elevated);
   font-family: inherit;
 }
 .trace-pulse {
@@ -3476,7 +3570,7 @@ onBeforeUnmount(() => {
   font-size: 11px;
   padding: 1px 6px;
   border-radius: 9px;
-  background: #fafafa;
+  background: var(--bg-subtle);
   color: #8c8c8c;
 }
 .trace-tip-status.is-completed {
@@ -3484,7 +3578,7 @@ onBeforeUnmount(() => {
   color: #389e0d;
 }
 .trace-tip-status.is-active {
-  background: #e6f4ff;
+  background: var(--brand-soft);
   color: #0958d9;
 }
 .trace-tip-row {
@@ -3494,7 +3588,7 @@ onBeforeUnmount(() => {
   line-height: 1.9;
 }
 .trace-tip-row span {
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
 }
 .trace-tip-row b {
   font-weight: 500;
@@ -3539,7 +3633,7 @@ onBeforeUnmount(() => {
   height: 24px;
   padding: 0 4px;
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.55);
+  color: var(--text);
 }
 .trace-collapse-btn:hover {
   color: #1677ff;
@@ -3559,7 +3653,7 @@ onBeforeUnmount(() => {
   margin-left: 4px;
   font-size: 12px;
   font-weight: 400;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
 }
 .trace-detail-stats b {
   color: #fa8c16;
@@ -3571,7 +3665,7 @@ onBeforeUnmount(() => {
   gap: 6px;
   margin-bottom: 0;
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.55);
+  color: var(--text);
   cursor: pointer;
   user-select: none;
 }
@@ -3604,7 +3698,7 @@ onBeforeUnmount(() => {
   max-height: none;
 }
 :global(.trace-modal .trace-row-active td) {
-  background: #eaf2ff !important;
+  background: var(--brand-soft) !important;
 }
 :global(.trace-modal .trace-row-active td:first-child) {
   box-shadow: inset 3px 0 0 #1677ff;
@@ -3692,7 +3786,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.85);
+  color: var(--text-strong);
 }
 .trace-modal .trace-comm-dot {
   width: 8px;
@@ -3713,8 +3807,8 @@ onBeforeUnmount(() => {
 .trace-modal .trace-comm-type {
   font-weight: 400;
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.45);
-  background: rgba(0, 0, 0, 0.04);
+  color: var(--text-tertiary);
+  background: var(--bg-hover);
   border-radius: 4px;
   padding: 0 4px;
 }
@@ -3726,7 +3820,7 @@ onBeforeUnmount(() => {
 }
 .trace-modal .trace-comm-status.is-pending {
   color: #ad4e00;
-  background: #fff7e6;
+  background: var(--warning-soft);
 }
 .trace-modal .trace-comm-status.is-replied {
   color: #389e0d;
@@ -3734,7 +3828,7 @@ onBeforeUnmount(() => {
 }
 .trace-modal .trace-comm-status.is-withdrawn {
   color: #8c8c8c;
-  background: #fafafa;
+  background: var(--bg-subtle);
 }
 .trace-modal .trace-comm-item {
   position: relative;
@@ -3763,14 +3857,14 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   font-size: 12px;
   line-height: 1.6;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
 }
 .trace-modal .trace-comm-from {
-  color: rgba(0, 0, 0, 0.75);
+  color: var(--text-strong);
   font-weight: 500;
 }
 .trace-modal .trace-comm-to {
-  color: rgba(0, 0, 0, 0.75);
+  color: var(--text-strong);
 }
 .trace-modal .trace-comm-arrow {
   color: #bfbfbf;
@@ -3783,7 +3877,7 @@ onBeforeUnmount(() => {
   margin-top: 2px;
   font-size: 13px;
   line-height: 1.65;
-  color: rgba(0, 0, 0, 0.82);
+  color: var(--text-strong);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -3815,12 +3909,12 @@ onBeforeUnmount(() => {
 .trace-modal .trace-comm-reply-text {
   font-size: 12.5px;
   line-height: 1.6;
-  color: rgba(0, 0, 0, 0.78);
+  color: var(--text-strong);
   white-space: pre-wrap;
   word-break: break-word;
 }
 .trace-modal .trace-comm-reply-text.is-empty {
-  color: rgba(0, 0, 0, 0.35);
+  color: var(--text-tertiary);
   font-style: italic;
 }
 .trace-modal .trace-comm-waiting {
@@ -3838,5 +3932,91 @@ onBeforeUnmount(() => {
   .trace-modal .trace-comm-item.is-follow {
     margin-left: 10px;
   }
+}
+
+/* ===== 深色模式：弹窗里仍是浅色的区域 =====
+   画布、概览卡、浮动工具条、悬停浮层、表格展开区、沟通面板此前都写死了浅色值，
+   antd 的 darkAlgorithm 管不到这些自定义区域，它们就成了深色弹窗里的白块。
+   这里只在深色下覆盖，浅色保持原样。 */
+html[data-theme='dark'] .trace-canvas {
+  border-color: var(--border);
+  background-color: var(--canvas-bg);
+  background-image: radial-gradient(var(--canvas-dot) 1px, transparent 1px);
+}
+html[data-theme='dark'] .trace-canvas:fullscreen,
+html[data-theme='dark'] .trace-canvas:-webkit-full-screen {
+  background-color: var(--canvas-bg);
+}
+html[data-theme='dark'] .trace-canvas-tools {
+  background: rgba(21, 28, 37, 0.92);
+  border-color: var(--border);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+html[data-theme='dark'] .trace-canvas-tools-split {
+  background: var(--border-strong);
+}
+/* 概览卡：浅蓝渐变在暗底上像一块反光板，换成极淡的品牌光晕 */
+html[data-theme='dark'] .trace-overview {
+  border-color: var(--border);
+  background: linear-gradient(135deg, rgba(64, 150, 255, 0.08) 0%, rgba(21, 28, 37, 0.55) 100%);
+}
+html[data-theme='dark'] .trace-stat {
+  border-color: var(--border-subtle);
+}
+html[data-theme='dark'] .trace-tip {
+  background: rgba(26, 34, 45, 0.98);
+  border-color: var(--border);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+}
+html[data-theme='dark'] .trace-tip-comment {
+  border-top-color: var(--border);
+  color: var(--text);
+}
+html[data-theme='dark'] .trace-tip-status.is-completed {
+  background: var(--success-soft);
+  color: var(--success);
+}
+html[data-theme='dark'] .trace-tip-status.is-active {
+  color: #a5cdff;
+}
+/* 状态角标里的 ✓ / ▶ / 数字：底色是亮色描边色，文字必须转深，不能沿用浅色模式的白字 */
+html[data-theme='dark'] .trace-badge,
+html[data-theme='dark'] .trace-comm-badge,
+html[data-theme='dark'] .trace-transfer-badge {
+  fill: #0b0f15;
+}
+html[data-theme='dark'] .trace-drill-bar {
+  border-color: var(--brand-soft-border);
+  background: var(--brand-soft);
+}
+html[data-theme='dark'] .trace-drill-bar.is-parent-entry {
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+}
+html[data-theme='dark'] .trace-child-item {
+  border-color: var(--border-subtle);
+}
+html[data-theme='dark'] .trace-child-item:hover {
+  background: var(--brand-soft);
+}
+html[data-theme='dark'] .trace-modal .ant-table-expanded-row > td {
+  background: #111925 !important;
+}
+html[data-theme='dark'] .trace-modal .trace-comm-panel {
+  border-left-color: var(--border);
+}
+html[data-theme='dark'] .trace-modal .trace-comm-session + .trace-comm-session {
+  border-top-color: var(--border);
+}
+html[data-theme='dark'] .trace-modal .trace-comm-status.is-replied {
+  color: var(--success);
+  background: var(--success-soft);
+}
+html[data-theme='dark'] .trace-modal .trace-comm-reply {
+  background: rgba(62, 207, 142, 0.1);
+  border-left-color: rgba(62, 207, 142, 0.4);
+}
+html[data-theme='dark'] .trace-modal .trace-comm-item::before {
+  background: var(--border-strong);
 }
 </style>

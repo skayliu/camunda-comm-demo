@@ -1,7 +1,9 @@
 <template>
+  <!-- 页脚最多同时出现 9 个按钮（转办/委托/加签/传阅/阅办/发起沟通/部门沟通/收回/通过审批），
+       680px 下按钮组总宽超出正文区，「通过审批」会被裁掉，加宽到 780 -->
   <DetailDrawer
     :open="open"
-    :width="680"
+    :width="780"
     :loading="loading"
     @update:open="(val) => { if (!val) close() }"
   >
@@ -105,13 +107,7 @@
             </span>
           </div>
           <!-- 意见单独成块：这是发起人「为什么加签」的说明，长文本需要与标签行分离 -->
-          <div
-            v-if="r.opinion"
-            class="sign-opinion"
-            style="margin-top: 6px; padding: 4px 10px; font-size: 12.5px; line-height: 1.7;
-                   color: rgba(0, 0, 0, 0.65); background: rgba(0, 0, 0, 0.025);
-                   border-left: 2px solid rgba(0, 0, 0, 0.12); border-radius: 0 2px 2px 0"
-          >
+          <div v-if="r.opinion" class="sign-opinion">
             意见：{{ r.opinion }}
           </div>
           <div class="muted" style="font-size: 11.5px; margin-top: 4px">
@@ -156,7 +152,7 @@
           <div class="drawer-section">
             <div class="drawer-section-title">沟通内容</div>
             <div class="comm-bubble">
-              <div style="margin-bottom: 8px; color: rgba(0, 0, 0, 0.45); font-size: 12px">
+              <div style="margin-bottom: 8px; color: var(--text-tertiary); font-size: 12px">
                 {{ task.commInitiator || '发起人' }} 于 {{ fmt(task.createTime) }} 发起
               </div>
               {{ task.commContent || '（无内容）' }}
@@ -206,7 +202,7 @@
               <div class="muted" style="font-size: 12.5px">{{ item.content }}</div>
               <div v-if="item.replyContent" class="comm-reply">
                 {{ item.replyContent }}
-                <div style="margin-top: 4px; color: #7a9c85; font-size: 11px">
+                <div style="margin-top: 4px; color: var(--text-secondary); font-size: 11px">
                   {{ item.replyTime ? fmt(item.replyTime) : '' }}
                 </div>
               </div>
@@ -263,6 +259,7 @@
             />
             <a-alert
               v-else
+              class="approve-ok"
               type="success"
               show-icon
               message="可以正常审批"
@@ -354,7 +351,7 @@
                   :class="{ pending: false }"
                 >
                   {{ item.replyContent }}
-                  <div style="margin-top: 4px; color: #7a9c85; font-size: 11px">
+                  <div style="margin-top: 4px; color: var(--text-secondary); font-size: 11px">
                     {{ item.replyUserId }} · {{ fmt(item.replyTime) }}
                   </div>
                 </div>
@@ -443,9 +440,19 @@
             <template #overlay>
               <a-menu @click="onSignMenu">
                 <a-menu-item key="PRE">前加签（我先请他审）</a-menu-item>
-                <!-- 单实例节点上并加签必然失败，后端按节点是否多实例下发该标记 -->
-                <a-menu-item v-if="task.supportsParallelSign" key="PARALLEL">
-                  并加签（同轮一起审）
+                <!-- 单实例节点上并加签必然失败，后端按节点是否多实例下发该标记。
+                     以前是整项隐藏，用户会以为「功能漏做了」；现在置灰保留，
+                     并用尾巴标注 + 悬停说明指出可用替代（前加签/后加签） -->
+                <a-menu-item
+                  key="PARALLEL"
+                  :disabled="!task.supportsParallelSign"
+                  :title="parallelSignHint"
+                  class="sign-menu-parallel"
+                >
+                  <span>并加签（同轮一起审）</span>
+                  <span v-if="!task.supportsParallelSign" class="sign-menu-note">
+                    单实例不可用
+                  </span>
                 </a-menu-item>
                 <a-menu-item key="POST">后加签（我通过后再审）</a-menu-item>
               </a-menu>
@@ -678,8 +685,20 @@ const canAddSign = computed(() =>
   && !signLocked.value
   && comm.value.bizStatus !== 'COMMUNICATING'
 )
+// 并加签不可用时的说明：讲清原因 + 直接给出替代路径，避免用户以为功能缺失
+const parallelSignHint = computed(() => (
+  task.value.supportsParallelSign
+    ? ''
+    : '当前节点是单实例，不能并加签；请改用前加签（我先请他审）或后加签（我通过后再审）'
+))
 
 function onSignMenu({ key }) {
+  // 并加签在单实例节点上不可用：菜单项已 disabled，这里再兜底一次，
+  // 防止禁用态失效时把请求发到服务端再吃一个 400
+  if (key === 'PARALLEL' && !task.value.supportsParallelSign) {
+    message.info('当前节点是单实例，不能并加签，请改用前加签或后加签')
+    return
+  }
   signType.value = key
   signOpen.value = true
 }

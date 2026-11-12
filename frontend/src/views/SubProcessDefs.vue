@@ -594,7 +594,7 @@ onBeforeUnmount(stopDiagTimer)
 
 .page-desc {
   margin: 0;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
   font-size: 13px;
 }
 
@@ -632,27 +632,27 @@ onBeforeUnmount(stopDiagTimer)
 }
 
 .reg-health.ok {
-  color: #389e0d;
-  background: #f6ffed;
-  border-color: #d9f7be;
+  color: var(--success);
+  background: var(--success-soft);
+  border-color: var(--success-border);
 }
 
 .reg-health.warn {
-  color: #d46b08;
-  background: #fff7e6;
-  border-color: #ffe7ba;
+  color: var(--warning);
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
 }
 
 .reg-health.danger {
-  color: #cf1322;
-  background: #fff1f0;
-  border-color: #ffccc7;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
 }
 
 .reg-health.muted {
-  color: rgba(0, 0, 0, 0.45);
-  background: #fafafa;
-  border-color: #f0f0f0;
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+  border-color: var(--border-subtle);
 }
 
 .mono {
@@ -660,11 +660,11 @@ onBeforeUnmount(stopDiagTimer)
 }
 
 .muted {
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-secondary);
 }
 
 .text-danger {
-  color: #cf1322;
+  color: var(--danger);
 }
 
 .stat-row {
@@ -676,14 +676,14 @@ onBeforeUnmount(stopDiagTimer)
 
 .stat-card {
   padding: 14px 16px;
-  background: #fff;
-  border: 1px solid #f0f0f0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
   border-radius: 10px;
 }
 
 .stat-label {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-secondary);
 }
 
 .stat-value {
@@ -694,20 +694,20 @@ onBeforeUnmount(stopDiagTimer)
 }
 
 .stat-value.ok {
-  color: #389e0d;
+  color: var(--success);
 }
 
 .stat-value.warn {
-  color: #d46b08;
+  color: var(--warning);
 }
 
 .stat-value.danger {
-  color: #cf1322;
+  color: var(--danger);
 }
 
 .stat-hint {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.35);
+  color: var(--text-secondary);
 }
 
 .table-card {
@@ -738,7 +738,7 @@ onBeforeUnmount(stopDiagTimer)
 .field-hint {
   margin-top: 4px;
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
 }
 
 @media (max-width: 900px) {

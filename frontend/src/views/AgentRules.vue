@@ -28,7 +28,7 @@
       description="规则到期后不会把已经代理出去的任务批量拉回，避免代理人处理到一半的任务突然消失。同一时间段只能有一条生效规则。"
     />
 
-    <a-card :bordered="false" style="border-radius: 10px">
+    <a-card :bordered="false">
       <a-table
         :columns="columns"
         :data-source="rows"

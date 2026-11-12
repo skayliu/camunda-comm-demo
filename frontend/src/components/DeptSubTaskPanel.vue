@@ -230,14 +230,14 @@ defineExpose({ submit, submitDisabled })
   margin-bottom: 12px;
 }
 .opinion-item {
-  border-left: 3px solid #e6f4ff;
+  border-left: 3px solid var(--brand-soft);
   padding: 6px 10px;
   margin-bottom: 8px;
-  background: #fafafa;
+  background: var(--bg-subtle);
 }
 .opinion-head {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
   margin-bottom: 4px;
 }
 .opinion-body {

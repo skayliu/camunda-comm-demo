@@ -1,0 +1,273 @@
+/* ============================================================
+ * 设计 token（浅色 / 深色两套）
+ *
+ * 约定：
+ *   1. 组件样式只允许引用这里的语义变量，不写具体色值；
+ *   2. 变量名按「用途」而非「颜色」命名（text-strong 而不是 gray-900），
+ *      深色模式只需重新赋值，不必改任何组件；
+ *   3. data-theme 挂在 <html> 上，由 src/composables/useTheme.js 维护。
+ * ============================================================ */
+
+:root {
+  color-scheme: light;
+
+  /* 品牌色 */
+  --brand: #1677ff;
+  --brand-hover: #4096ff;
+  --brand-active: #0958d9;
+  --brand-soft: #e8f2ff;
+  --brand-soft-border: #b9d8ff;
+
+  /* 语义色（状态用，两个模式通用色相，仅调整明度） */
+  --success: #12a150;
+  --success-soft: #e8f8ef;
+  --success-border: #b3e6c9;
+  /* 可审批状态条：成功色只保留在图标上，底色压到接近中性，避免整块绿抢走视线 */
+  --approve-soft: #f6faf8;
+  --approve-border: #e6efea;
+  --warning: #d97b06;
+  --warning-soft: #fff6e6;
+  --warning-border: #ffdfae;
+  --danger: #e0313f;
+  --danger-soft: #fdeced;
+  --danger-border: #f8c2c7;
+  --info: #1677ff;
+  --info-soft: #e8f2ff;
+  /* 大块提示底（Alert 等整行提示）：soft 的饱和度放在 1180×97 这种面积上会抢视线，
+     深色下更会积成明显色块（实测色度增量 13）。大块单独用更淡的一档。 */
+  --info-block: #f3f8ff;
+  --info-block-border: #d9e8fb;
+  --success-block: #f1f9f4;
+  --warning-block: #fdf8ef;
+  --danger-block: #fdf3f3;
+  /* 统计卡片的辅助色：成对出现，深色下会换成低饱和高亮版本 */
+  --teal: #0e9f9a;
+  --teal-soft: #e6fffb;
+  --purple: #722ed1;
+  --purple-soft: #f9f0ff;
+  --indigo: #2f54eb;
+  --indigo-soft: #f0f5ff;
+
+  /* 背景层级：body < sunken < subtle < elevated */
+  --bg-body: #f1f4f9;
+  --bg-sunken: #eaeef5;
+  --bg-subtle: #f7f9fc;
+  --bg-elevated: #ffffff;
+  --bg-hover: rgba(16, 24, 40, 0.045);
+  --bg-active: rgba(16, 24, 40, 0.075);
+  --bg-inverse: #101828;
+
+  /* 描边 */
+  --border: #e4e8ef;
+  --border-subtle: #eef1f5;
+  --border-strong: #d3dae5;
+
+  /* 文字：tertiary 只用于辅助信息（时间、节点名、条数），
+     原值 #98a2b3 在白底上仅 2.58:1，11-12px 会读不清，已压深到 4.3:1 */
+  --text-strong: #101828;
+  --text: #344054;
+  --text-secondary: #667085;
+  --text-tertiary: #6f7b8c;
+  --text-disabled: #c3cad5;
+  /* 「禁用但仍要读得清」的一档：#c3cad5 在白底只有 1.68:1，
+     用在需要说明原因/替代方案的置灰项上会糊成一片，这里单独给一档 2.9:1 的灰 */
+  --text-disabled-readable: #8e99a8;
+  --text-inverse: #ffffff;
+  --text-on-brand: #ffffff;
+
+  /* 侧栏：浅色下与内容区同为浅色，靠描边与选中态区分层次 */
+  --sider-bg: #ffffff;
+  --sider-bg-end: #f7f9fc;
+  --sider-text: #475467;
+  --sider-text-strong: #101828;
+  --sider-hover: rgba(16, 24, 40, 0.055);
+  --sider-border: #e4e8ef;
+  --sider-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+
+  /* 顶栏 */
+  --header-bg: rgba(255, 255, 255, 0.92);
+  --header-border: rgba(16, 24, 40, 0.07);
+
+  /* 阴影：越靠上层越扩散，不用大面积重阴影 */
+  --shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-sm: 0 1px 3px rgba(16, 24, 40, 0.07), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-md: 0 6px 16px rgba(16, 24, 40, 0.08), 0 2px 4px rgba(16, 24, 40, 0.04);
+  --shadow-lg: 0 16px 40px rgba(16, 24, 40, 0.14), 0 4px 10px rgba(16, 24, 40, 0.06);
+
+  /* 圆角：按层级递进，避免全部用同一个大圆角 */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 999px;
+
+  /* 计数角标：浅色下用实心红，深色下换成半透明底 + 亮字，避免大红色块在暗底上刺眼 */
+  --badge-count-bg: #e0313f;
+  --badge-count-text: #ffffff;
+  --badge-count-border: transparent;
+
+  /* 标签：antd 的 preset 色板（blue/orange/purple…）由内置算法生成，不经过我们的 token。
+     浅色下沿用同类淡底，但文字统一压深一档——antd 默认 orange 文字 #d46b08 在
+     #fff7e6 上只有 3.34，processing 3.66，11-12px 下有读不清的问题。 */
+  --tag-brand-bg: #e8f2ff;
+  --tag-brand-border: #b9d8ff;
+  --tag-brand-text: #0958d9;
+  --tag-success-bg: #e8f8ef;
+  --tag-success-border: #b3e6c9;
+  --tag-success-text: #0e7a41;
+  --tag-warning-bg: #fff6e6;
+  --tag-warning-border: #ffdfae;
+  --tag-warning-text: #8a4a00;
+  --tag-danger-bg: #fdeced;
+  --tag-danger-border: #f8c2c7;
+  --tag-danger-text: #a8071a;
+  --tag-purple-bg: #f9f0ff;
+  --tag-purple-border: #efdbff;
+  --tag-purple-text: #531dab;
+  --tag-teal-bg: #e6fffb;
+  --tag-teal-border: #b5f5ec;
+  --tag-teal-text: #08756f;
+  --tag-indigo-bg: #f0f5ff;
+  --tag-indigo-border: #d6e4ff;
+  --tag-indigo-text: #2440b3;
+
+  /* 大块淡紫底（委托记录面板）：和 info/success 一样单独留一档，
+     深色下不能沿用 0.18 alpha 的 --purple-soft，否则整块泛紫 */
+  --purple-block: #f9f0ff;
+  --purple-block-border: #efdbff;
+
+  /* 流程图绘图区：深色下不能留白底，否则弹窗里会像一块没跟主题走的白板 */
+  --canvas-bg: #fcfdff;
+  --canvas-dot: #e9edf3;
+  --canvas-grid: rgba(16, 24, 40, 0.06);
+
+  /* 其他 */
+  --ring: rgba(22, 119, 255, 0.28);
+  --overlay: rgba(16, 24, 40, 0.45);
+  --scrollbar-thumb: rgba(16, 24, 40, 0.18);
+  --scrollbar-thumb-hover: rgba(16, 24, 40, 0.3);
+  --code-bg: #f3f6fb;
+
+  /* 动效 */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur: 180ms;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --brand: #4096ff;
+  --brand-hover: #6cb2ff;
+  --brand-active: #1677ff;
+  --brand-soft: rgba(64, 150, 255, 0.16);
+  --brand-soft-border: rgba(64, 150, 255, 0.34);
+
+  --success: #3ecf8e;
+  --success-soft: rgba(62, 207, 142, 0.14);
+  --success-border: rgba(62, 207, 142, 0.32);
+  /* 深色底本身带 16 的色度（#151c25 偏蓝），叠加绿色后按绝对色度衡量必然偏高。
+     这里 alpha 从 0.055 压到 0.03，只留一层很薄的绿雾，色相仍可辨、不抢视线 */
+  --approve-soft: rgba(62, 207, 142, 0.03);
+  --approve-border: rgba(62, 207, 142, 0.1);
+  --warning: #f5b04c;
+  --warning-soft: rgba(245, 176, 76, 0.14);
+  --warning-border: rgba(245, 176, 76, 0.32);
+  --danger: #ff7b83;
+  --danger-soft: rgba(255, 123, 131, 0.14);
+  --danger-border: rgba(255, 123, 131, 0.32);
+  --info: #4096ff;
+  --info-soft: rgba(64, 150, 255, 0.16);
+  /* 深底本身带 16 的色度，大块提示只留 0.04 的一层雾（增量控制在 8 以内） */
+  --info-block: rgba(64, 150, 255, 0.04);
+  --info-block-border: rgba(64, 150, 255, 0.28);
+  --success-block: rgba(62, 207, 142, 0.04);
+  --warning-block: rgba(245, 176, 76, 0.04);
+  --danger-block: rgba(255, 123, 131, 0.04);
+  --teal: #35d6c8;
+  --teal-soft: rgba(53, 214, 200, 0.14);
+  --purple: #b37feb;
+  --purple-soft: rgba(146, 84, 222, 0.18);
+  --indigo: #7d95f7;
+  --indigo-soft: rgba(47, 84, 235, 0.18);
+
+  --bg-body: #0b0f15;
+  --bg-sunken: #080b10;
+  --bg-subtle: #1a222d;
+  --bg-elevated: #151c25;
+  --bg-hover: rgba(255, 255, 255, 0.055);
+  --bg-active: rgba(255, 255, 255, 0.09);
+  --bg-inverse: #e8eef6;
+
+  --border: #263140;
+  --border-subtle: #1e2733;
+  --border-strong: #37455a;
+
+  --text-strong: #e9eff7;
+  --text: #c4cfdd;
+  --text-secondary: #8e9bad;
+  --text-tertiary: #7d8898;
+  --text-disabled: #4b5768;
+  --text-disabled-readable: #6a7585;
+  --text-inverse: #0b0f15;
+
+  --sider-bg: #070c13;
+  --sider-bg-end: #05090e;
+  --sider-text: rgba(255, 255, 255, 0.66);
+  --sider-text-strong: #ffffff;
+  --sider-hover: rgba(255, 255, 255, 0.07);
+  --sider-border: rgba(255, 255, 255, 0.06);
+  --sider-shadow: none;
+
+  --header-bg: rgba(21, 28, 37, 0.82);
+  --header-border: rgba(255, 255, 255, 0.07);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.38), 0 1px 2px rgba(0, 0, 0, 0.24);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.42), 0 2px 6px rgba(0, 0, 0, 0.28);
+  --shadow-lg: 0 18px 44px rgba(0, 0, 0, 0.55), 0 6px 14px rgba(0, 0, 0, 0.35);
+
+  --ring: rgba(64, 150, 255, 0.38);
+  --overlay: rgba(3, 6, 10, 0.62);
+
+  /* 角标：半透明红底 + 亮粉字，与深色主题的 danger 同色相，不再是一块饱和红 */
+  --badge-count-bg: rgba(255, 123, 131, 0.18);
+  --badge-count-text: #ffa5ab;
+  --badge-count-border: rgba(255, 123, 131, 0.4);
+
+  /* 标签：深色下所有色相统一 0.04 的一层色雾。
+     深底 #151c25 自身就有 16 的色度，alpha 一旦到 0.14–0.16（antd 默认），
+     blue 合成后增量 11、orange 10，一屏几个 tag 就成了彩色噪点。
+     0.04 下各色相落在 3.7–7.0，都 ≤ 8；文字换亮色、描边留 20% 保住边界。 */
+  --tag-brand-bg: rgba(64, 150, 255, 0.04);
+  --tag-brand-border: rgba(64, 150, 255, 0.2);
+  --tag-brand-text: #8cc0ff;
+  --tag-success-bg: rgba(62, 207, 142, 0.04);
+  --tag-success-border: rgba(62, 207, 142, 0.2);
+  --tag-success-text: #5fe0a5;
+  --tag-warning-bg: rgba(245, 176, 76, 0.04);
+  --tag-warning-border: rgba(245, 176, 76, 0.2);
+  --tag-warning-text: #f5b04c;
+  --tag-danger-bg: rgba(255, 123, 131, 0.04);
+  --tag-danger-border: rgba(255, 123, 131, 0.2);
+  --tag-danger-text: #ffa5ab;
+  --tag-purple-bg: rgba(179, 127, 235, 0.04);
+  --tag-purple-border: rgba(179, 127, 235, 0.2);
+  --tag-purple-text: #d3adf7;
+  --tag-teal-bg: rgba(53, 214, 200, 0.04);
+  --tag-teal-border: rgba(53, 214, 200, 0.2);
+  --tag-teal-text: #5ee0d5;
+  --tag-indigo-bg: rgba(125, 149, 247, 0.04);
+  --tag-indigo-border: rgba(125, 149, 247, 0.2);
+  --tag-indigo-text: #9db2ff;
+
+  --purple-block: rgba(146, 84, 222, 0.04);
+  --purple-block-border: rgba(179, 127, 235, 0.2);
+
+  --canvas-bg: #0f1620;
+  --canvas-dot: rgba(255, 255, 255, 0.055);
+  --canvas-grid: rgba(255, 255, 255, 0.035);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.16);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
+  --code-bg: #1c2531;
+}

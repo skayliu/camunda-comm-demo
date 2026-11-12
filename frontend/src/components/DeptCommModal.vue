@@ -157,7 +157,7 @@ ensureLoaded()
   align-items: center;
 }
 .sp-desc {
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--text-tertiary);
   font-size: 12px;
   white-space: normal;
 }

@@ -17,7 +17,7 @@
       </a-space>
     </div>
 
-    <a-card :bordered="false" style="border-radius: 10px">
+    <a-card :bordered="false">
       <div class="toolbar">
         <a-input-search
           v-model:value="keyword"
